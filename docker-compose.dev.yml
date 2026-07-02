@@ -1,0 +1,17 @@
+# ============================================================================
+# Override สำหรับ "dev บนเครื่อง" เท่านั้น — เปิด port DB ออก host ที่ 5433
+# (base compose ตั้งใจไม่ expose DB — ไฟล์นี้ต้องเรียกแบบ explicit เท่านั้น
+#  จึงไม่กระทบ `docker compose up` ปกติ)
+#
+# ใช้:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+#   DATABASE_URL=postgresql://savings:${DB_PASSWORD}@localhost:5433/school_savings \
+#     npx prisma migrate dev
+#
+# หมายเหตุ: ใช้ 5433 เพราะเครื่อง dev มักมี postgres ของ host ครอง 5432 อยู่แล้ว
+# ============================================================================
+
+services:
+  db:
+    ports:
+      - "127.0.0.1:5433:5432"

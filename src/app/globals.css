@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy: #1e3a5f;
+  --surface: #f5f7fa;
+  --line: #e2e8f0;
+  --deposit: #16a34a;
+  --withdraw: #dc2626;
+  --gold: #d4a843;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-slate-800;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-semibold text-slate-900;
+  }
+
+  ::selection {
+    @apply bg-navy/20;
+  }
+}
+
+@layer components {
+  /* กล่องพื้นผิวมาตรฐานของระบบ — ขาว ขอบบาง เงาบาง มุมโค้ง 12px */
+  .card-surface {
+    @apply rounded-card border border-line bg-white shadow-card;
+  }
+
+  /* เซลล์จำนวนเงินในตาราง — ชิดขวา เลขความกว้างเท่ากัน */
+  .amount-cell {
+    @apply text-right tabular-nums;
+  }
+
+  /* ลิงก์สีน้ำเงินกรมท่า */
+  .link-navy {
+    @apply text-navy underline-offset-2 hover:underline;
+  }
+}

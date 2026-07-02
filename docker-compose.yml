@@ -1,0 +1,57 @@
+# ============================================================================
+# ระบบออมทรัพย์โรงเรียนบ้านกะดาด — docker compose (app + db)
+#
+# ใช้: cp .env.example .env  ->  แก้ SESSION_SECRET/DB_PASSWORD  ->
+#      docker compose up -d --build
+#
+# compose อ่านตัวแปร ${...} จากไฟล์ .env ข้างไฟล์นี้อัตโนมัติ
+# หมายเหตุ: DATABASE_URL ใน .env มีไว้สำหรับ dev บนเครื่อง (localhost) —
+#           ใน compose เราตั้ง DATABASE_URL ของ container เองให้ชี้ไป service "db"
+# ============================================================================
+
+# pin ชื่อ project ให้คงที่ — ไม่ผูกกับชื่อโฟลเดอร์ (กัน rename โฟลเดอร์แล้ว
+# compose มองไม่เห็น volume เดิม -> สร้าง pgdata เปล่าใหม่ เหมือนข้อมูลหาย)
+name: school-savings
+
+services:
+  app:
+    build: .
+    container_name: school-savings-app
+    ports:
+      - "3000:3000"
+    environment:
+      # ชี้ไป service db ผ่าน network ภายในของ compose
+      DATABASE_URL: postgresql://savings:${DB_PASSWORD:?ต้องตั้ง DB_PASSWORD ใน .env}@db:5432/school_savings
+      SESSION_SECRET: ${SESSION_SECRET:?ต้องตั้ง SESSION_SECRET ใน .env (สุ่มยาว >= 32 ตัวอักษร)}
+      # Secure attribute ของ session cookie — default false เพราะ deploy นี้เป็น
+      # plain HTTP ใน LAN (http://<ip>:3000) ถ้าติด Secure browser จะทิ้ง cookie
+      # แล้ว login วนไม่ติด; ตั้ง true ใน .env เฉพาะเมื่อมี HTTPS reverse proxy ข้างหน้า
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TZ: Asia/Bangkok
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    container_name: school-savings-db
+    # ตั้งใจ "ไม่" expose port ออก host — เข้าถึง DB ได้เฉพาะภายใน compose network
+    # (backup/psql ให้ใช้ docker compose exec db ... ดู README.md)
+    environment:
+      POSTGRES_USER: savings
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?ต้องตั้ง DB_PASSWORD ใน .env}
+      POSTGRES_DB: school_savings
+      TZ: Asia/Bangkok
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U savings -d school_savings"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

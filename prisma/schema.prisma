@@ -1,0 +1,138 @@
+// ระบบออมทรัพย์โรงเรียนบ้านกะดาด — Prisma schema
+// หลักการสำคัญ: ธุรกรรมห้ามลบ (immutable) — ยกเลิกได้ด้วยการตั้ง status = VOIDED เท่านั้น
+// ยอดคงเหลือ (Account.balance) ต้องตรวจสอบย้อนหลังได้จากผลรวม Transaction ที่ status = NORMAL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  PARENT
+}
+
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  MOVED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+}
+
+enum TransactionStatus {
+  NORMAL
+  VOIDED
+}
+
+model User {
+  id              String  @id @default(cuid())
+  username        String  @unique
+  passwordHash    String
+  role            Role
+  name            String
+  // PARENT เท่านั้น: ผูกกับนักเรียนที่เป็นลูกของตน
+  linkedStudentId String?
+  linkedStudent   Student? @relation("ParentLink", fields: [linkedStudentId], references: [id])
+
+  // ครูประจำชั้น (Classroom.teacherId)
+  homeroomClassrooms Classroom[] @relation("HomeroomTeacher")
+
+  recordedTransactions Transaction[] @relation("RecordedBy")
+  voidedTransactions   Transaction[] @relation("VoidedBy")
+
+  createdAt DateTime @default(now())
+
+  @@index([linkedStudentId])
+}
+
+model AcademicYear {
+  id       String    @id @default(cuid())
+  year     Int       @unique // ปี พ.ศ. เช่น 2569
+  isActive Boolean   @default(false)
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
+
+  classrooms Classroom[]
+  accounts   Account[]
+}
+
+model Classroom {
+  id             String       @id @default(cuid())
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  name           String // เช่น "ป.1/1"
+  teacherId      String?
+  teacher        User?        @relation("HomeroomTeacher", fields: [teacherId], references: [id])
+
+  students Student[]
+
+  @@unique([academicYearId, name])
+  @@index([teacherId])
+}
+
+model Student {
+  id          String        @id @default(cuid())
+  studentCode String        @unique // รหัสนักเรียน เช่น "69001"
+  firstName   String
+  lastName    String
+  classroomId String
+  classroom   Classroom     @relation(fields: [classroomId], references: [id])
+  status      StudentStatus @default(ACTIVE)
+
+  accounts Account[]
+  parents  User[]    @relation("ParentLink")
+
+  @@index([classroomId])
+}
+
+model Account {
+  id             String       @id @default(cuid())
+  studentId      String
+  student        Student      @relation(fields: [studentId], references: [id])
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  // ยอดยกมาจากปีการศึกษาก่อนหน้า
+  openingBalance Decimal      @default(0) @db.Decimal(12, 2)
+  // ยอดคงเหลือปัจจุบัน (denormalized) = openingBalance + SUM(DEPOSIT) - SUM(WITHDRAW) เฉพาะ status NORMAL
+  balance        Decimal      @default(0) @db.Decimal(12, 2)
+
+  transactions Transaction[]
+
+  @@unique([studentId, academicYearId])
+  @@index([academicYearId])
+}
+
+model Transaction {
+  id        String          @id @default(cuid())
+  accountId String
+  account   Account         @relation(fields: [accountId], references: [id])
+  type      TransactionType
+  amount    Decimal         @db.Decimal(12, 2) // ต้อง > 0 เสมอ (ตรวจฝั่งแอป)
+  txnDate   DateTime // วันที่ทำรายการจริง (ครูอาจบันทึกย้อนหลัง)
+
+  recordedById String
+  recordedBy   User   @relation("RecordedBy", fields: [recordedById], references: [id])
+  note         String?
+
+  // ห้ามลบธุรกรรม — ยกเลิกด้วยการตั้ง VOIDED พร้อมระบุผู้ยกเลิกและเวลา
+  status     TransactionStatus @default(NORMAL)
+  voidedById String?
+  voidedBy   User?             @relation("VoidedBy", fields: [voidedById], references: [id])
+  voidedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([accountId, txnDate])
+  @@index([txnDate])
+  @@index([recordedById])
+  @@index([status])
+}

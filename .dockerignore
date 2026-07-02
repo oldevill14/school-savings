@@ -1,0 +1,27 @@
+# ---------- dependencies / build outputs ----------
+node_modules
+.next
+out
+build
+*.tsbuildinfo
+
+# ---------- secrets — ห้ามหลุดเข้า image เด็ดขาด ----------
+.env
+.env.*
+
+# ---------- docker เอง ----------
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# ---------- เอกสาร / โน้ตทีม (ไม่จำเป็นต่อ build) ----------
+*.md
+
+# ---------- misc ----------
+.git
+.gitignore
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.pem
