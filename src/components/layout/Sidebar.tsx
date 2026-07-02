@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PiggyBank } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/auth";
 import { getNavItems, isNavActive } from "./nav-items";
@@ -25,8 +24,9 @@ export default function Sidebar({ role, year = null }: SidebarProps) {
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-navy text-white lg:flex">
       {/* หัว sidebar */}
       <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gold/20">
-          <PiggyBank className="h-6 w-6 text-gold-light" />
+        <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-gold/20">
+          {/* โลโก้ระบบ — เปลี่ยนได้โดยแทนที่ไฟล์ public/logo.png (ดู README หัวข้อ "เปลี่ยนโลโก้") */}
+          <img src="/logo.png" alt="ตราโรงเรียน" className="h-7 w-7 object-contain" />
         </span>
         <div>
           <div className="text-sm font-semibold leading-tight">โรงเรียนบ้านกะดาด</div>

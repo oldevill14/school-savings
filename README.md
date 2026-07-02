@@ -44,6 +44,29 @@ seed สร้างเพิ่ม: ปีการศึกษา 2569 (active
 
 > คำเตือน: seed **ล้างข้อมูลเดิมทั้งหมด**ก่อนใส่ข้อมูลตัวอย่าง — ห้ามรันกับฐานข้อมูลที่ใช้งานจริงแล้ว
 
+## เปลี่ยนโลโก้ระบบ (ใส่ตราโรงเรียนของท่าน)
+
+โลโก้ทุกจุดในระบบ (หน้า login ทั้งมือถือ/เดสก์ท็อป และหัว Sidebar) อ่านจาก**ไฟล์เดียว**:
+
+| รายการ | ค่า |
+|---|---|
+| พาทไฟล์ | `public/logo.png` |
+| นามสกุลไฟล์ | `.png` (แนะนำพื้นหลังโปร่งใส) |
+| ขนาดแนะนำ | **512 × 512 px** (จัตุรัส) — จุดแสดงผลจริงเล็กสุด 28px ใหญ่สุด 56px ระบบย่อให้อัตโนมัติ |
+
+วิธีเปลี่ยน: นำไฟล์ตราโรงเรียนมาวางทับ `public/logo.png` (ใช้ชื่อไฟล์เดิม) แล้ว
+
+- รันแบบ dev → refresh browser ได้เลย
+- รันแบบ Docker → `docker compose up -d --build app` (ต้อง build ใหม่ เพราะไฟล์ถูก copy เข้า image)
+
+หมายเหตุ:
+
+- โลโก้ถูกครอบในกรอบวงกลม/มุมโค้ง — โลโก้ทรงจัตุรัสพื้นหลังโปร่งใสจะออกมาสวยสุด
+  (ระบบใช้ `object-contain` จึงไม่ถูกตัดขอบแม้สัดส่วนไม่จัตุรัส)
+- ถ้าตราโรงเรียนเป็น `.jpg` ให้แปลงเป็น `.png` ก่อน (เปิดด้วยโปรแกรมรูปภาพแล้ว Save As/Export เป็น PNG)
+- อยากใช้ชื่อไฟล์/นามสกุลอื่น: แก้ `src="/logo.png"` ในโค้ด 3 จุด —
+  `src/components/LoginCard.tsx` (2 จุด) และ `src/components/layout/Sidebar.tsx` (1 จุด)
+
 ---
 
 ## วิธีรันแบบ Development
@@ -154,6 +177,8 @@ docker compose start app
 │   │   └── api/             # route handlers (auth, transactions, stats, ...)
 │   ├── components/          # ui/ (Button, Card, Table, ...), layout/, charts/
 │   └── lib/                 # auth (session/role guard), db (prisma), money, thai-date
+├── public/
+│   └── logo.png             # โลโก้ระบบ 512×512 — แทนที่ด้วยตราโรงเรียนของท่าน (ดูหัวข้อ "เปลี่ยนโลโก้ระบบ")
 ├── Dockerfile               # multi-stage: deps -> build -> runner (standalone)
 ├── docker-compose.yml       # app + postgres:17 (db ไม่ expose ออก host)
 └── .env.example             # ตัวอย่าง environment variables

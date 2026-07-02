@@ -20,7 +20,6 @@ import {
   EyeOff,
   Lock,
   LogIn,
-  PiggyBank,
   UserRound,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
@@ -99,8 +98,9 @@ export default function LoginCard({ nextPath = null, year = null }: LoginCardPro
       <div className="bg-navy text-white">
         {/* mobile: ย่อเป็น header แถบบน */}
         <div className="flex items-center gap-3 px-5 py-4 lg:hidden">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 ring-2 ring-gold">
-            <PiggyBank className="h-6 w-6 text-gold" aria-hidden="true" />
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10 ring-2 ring-gold">
+            {/* โลโก้ระบบ — เปลี่ยนได้โดยแทนที่ไฟล์ public/logo.png (ดู README หัวข้อ "เปลี่ยนโลโก้") */}
+            <img src="/logo.png" alt="ตราโรงเรียน" className="h-8 w-8 object-contain" />
           </div>
           <div className="min-w-0">
             <p className="truncate text-base font-semibold text-white">
@@ -114,8 +114,9 @@ export default function LoginCard({ nextPath = null, year = null }: LoginCardPro
 
         {/* desktop: แผงเต็มความสูง */}
         <div className="hidden h-full flex-col p-10 lg:flex">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 ring-2 ring-gold">
-            <PiggyBank className="h-10 w-10 text-gold" aria-hidden="true" />
+          <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-white/10 ring-2 ring-gold">
+            {/* โลโก้ระบบ — เปลี่ยนได้โดยแทนที่ไฟล์ public/logo.png (ดู README หัวข้อ "เปลี่ยนโลโก้") */}
+            <img src="/logo.png" alt="ตราโรงเรียน" className="h-14 w-14 object-contain" />
           </div>
 
           <h1 className="mt-6 text-2xl font-semibold leading-snug text-white">
