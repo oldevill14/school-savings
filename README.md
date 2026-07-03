@@ -1,28 +1,70 @@
-# ระบบออมทรัพย์โรงเรียน — โรงเรียนบ้านกะดาด
+# ระบบออมทรัพย์โรงเรียน
 
-ระบบบันทึกเงินออมทรัพย์นักเรียน โรงเรียนบ้านกะดาด สพป.สุรินทร์ เขต 3 ปีการศึกษา 2569
-ครูบันทึกฝาก-ถอนรายวัน ผู้ปกครองเปิดดูยอดของลูกได้เอง และผู้ดูแลระบบดูรายงานภาพรวมทั้งโรงเรียน
+ระบบบันทึกเงินออมทรัพย์นักเรียนสำหรับโรงเรียนประถม — ครูบันทึกฝาก-ถอนรายวัน
+ผู้ปกครองเปิดดูยอดของลูกได้เอง และผู้ดูแลระบบดูรายงานภาพรวมทั้งโรงเรียน
+**แจกฟรีให้ทุกโรงเรียน** (MIT) — ตั้งชื่อโรงเรียน/สังกัด/โลโก้เองได้ผ่านหน้าเว็บ ไม่ต้องแก้โค้ด
+
+> ค่าเริ่มต้นในระบบเป็นข้อมูลตัวอย่างของ "โรงเรียนบ้านกะดาด สพป.สุรินทร์ เขต 3 ปีการศึกษา 2569"
+> เปลี่ยนเป็นของโรงเรียนท่านได้ที่เมนู **ตั้งค่าโรงเรียน** (ดูหัวข้อ "เปลี่ยนชื่อโรงเรียน / โลโก้")
+
+## ฟีเจอร์
+
+### งานประจำวัน
+- **บันทึกฝาก-ถอนรายวัน** — ทั้งห้องพร้อมกัน (กรอกไล่ทีละคนแล้วบันทึกทีเดียว) หรือรายคน · กันถอนเกินยอด · ทุกชุดเป็น transaction เดียว (ล้มเหลว = ยกเลิกทั้งชุด)
+- **สลิป/ใบเสร็จ** — พิมพ์สลิปให้ผู้ปกครองได้ทันทีหลังบันทึก
+- **ปิดยอดเงินสดรายวัน** — กระทบยอดเงินสดในมือกับตัวเลขในระบบก่อนนำส่งธนาคาร บันทึกยอดนับจริง + ส่วนต่าง
+- **พิมพ์สมุดบัญชีรายคน** — สไตล์สมุดธนาคาร พร้อมกราฟแนวโน้มการออม พิมพ์ลง A4 ได้
+
+### รายงานและเอกสาร
+- **รายงานสรุปรายห้อง / รายปี** — ตัวเลขคำนวณจากธุรกรรมจริง ตรวจย้อนหลังได้
+- **ทะเบียนคุมเงินออมทรัพย์** — แบบฟอร์มแนวราชการ มีช่องผู้จัดทำ/ผู้ตรวจ พิมพ์ส่งเขต/สตง.
+- **Export Excel** — ดาวน์โหลดรายงานและรายชื่อนักเรียนเป็น `.xlsx`
+- **เกียรติบัตรนักออม + เหรียญรางวัล** — ออมครบเป้า/ต่อเนื่อง พิมพ์เกียรติบัตรได้
+
+### จัดการระบบ
+- **รองรับทุกปีการศึกษา** — ปิดปี → ยกยอด → เลื่อนชั้น → เปิดปีใหม่อัตโนมัติใน transaction เดียว
+- **จ่ายดอกเบี้ยประจำปี** — คำนวณ + จ่ายทั้งโรงเรียนพร้อมกัน (กันจ่ายซ้ำระดับ DB)
+- **ตั้งค่าโรงเรียน** — แก้ชื่อ/สังกัด + อัปโหลดโลโก้ผ่านเว็บ แสดงทั่วทั้งระบบทันที
+- **บันทึกการใช้งาน (Audit log)** — เก็บทุกการกระทำสำคัญ: เข้าระบบ, ยกเลิกรายการ, ปิดปี, จ่ายดอกเบี้ย, รีเซ็ตรหัส ฯลฯ
+- **จัดการผู้ใช้** — สร้าง/ปิดใช้งาน, รีเซ็ตรหัส (บังคับเปลี่ยนครั้งแรก), ผูกผู้ปกครองกับนักเรียน
+
+### สำหรับผู้ปกครอง / นักเรียน
+- **ผู้ปกครองดูยอดลูกได้ทุกเวลา** — mobile-first, 1 บัญชีดูลูกได้**หลายคน**
+- **เปลี่ยนรหัสผ่านเอง** — หน้า "บัญชีของฉัน" (ทุก role)
+- **รูปนักเรียน** — ในโปรไฟล์และสมุดบัญชี
+- **แจ้งเตือนผ่าน LINE** — เมื่อมีฝาก-ถอน (ตัวเลือกเสริม ต้องตั้ง env + HTTPS)
+- **PWA** — ติดตั้งลงหน้าจอมือถือเหมือนแอปจริง
+
+### ปลอดภัย / ดูแลระบบ
+- แบ่งสิทธิ์ 4 บทบาท ตรวจฝั่ง server ทุก endpoint · รหัสผ่าน bcrypt · ป้องกันเดารหัส (rate-limit)
+- **ธุรกรรมห้ามลบ** (immutable) — ยกเลิกด้วยการ VOID เท่านั้น ประวัติครบเสมอ
+- **สำรองฐานข้อมูลอัตโนมัติทุกวัน** (service ใน docker compose เก็บ 14 วันล่าสุด)
 
 ## Stack
 
-- **Next.js 15** (App Router, `src/`, `output: "standalone"`) + TypeScript
+- **Next.js 15** (App Router, `src/`, `output: "standalone"`) + TypeScript · PWA
 - **Tailwind CSS 3.4** · ฟอนต์ Sarabun · ไอคอน lucide-react · กราฟ recharts
 - **Prisma + PostgreSQL** (เงินเก็บเป็น `Decimal(12,2)`)
-- Auth: bcryptjs + jose (JWT ใน httpOnly cookie, อายุ 12 ชม.)
-- Docker multi-stage (`node:22-alpine`) + docker compose (app + postgres:17-alpine)
+- Auth: bcryptjs + jose (JWT ใน httpOnly cookie, อายุ 12 ชม.) · rate-limit เดารหัส
+- Export Excel ด้วย exceljs · แจ้งเตือน LINE Messaging API (ตัวเลือกเสริม)
+- Docker multi-stage (`node:22-alpine`) + docker compose (app + postgres:17-alpine + db-backup)
 
 ## โครงสร้างระบบย่อ
 
-3 บทบาท (ทุก API/Server Action ตรวจ role ฝั่ง server เสมอ):
+4 บทบาท (ทุก API/Server Action ตรวจ role ฝั่ง server เสมอ):
 
 | Role | เข้าได้ | ทำอะไร |
 |---|---|---|
-| `ADMIN` | ทุกหน้า | จัดการผู้ใช้/ห้องเรียน/ปีการศึกษา, บันทึกฝาก-ถอน, รายงาน |
-| `TEACHER` | dashboard, ธุรกรรม, นักเรียน, รายงาน | บันทึกฝาก-ถอนของนักเรียน |
-| `PARENT` | `/my-child`, `/passbook` ของลูกตัวเอง | ดูยอดและประวัติของลูก |
+| `ADMIN` | ทุกหน้า | จัดการผู้ใช้/ห้องเรียน/ปีการศึกษา, บันทึกฝาก-ถอน, ปิดยอดเงินสด, จ่ายดอกเบี้ย, ตั้งค่าโรงเรียน, รายงาน, audit |
+| `TEACHER` | dashboard, ธุรกรรม, นักเรียน, รายงาน, ปิดยอดเงินสด | บันทึกฝาก-ถอน + จัดการนักเรียนเฉพาะห้องตนเอง |
+| `EXECUTIVE` | dashboard, ธุรกรรม, นักเรียน, รายงาน | **ดูอย่างเดียว** (ผู้บริหาร/ผอ.) — ไม่มีสิทธิ์แก้ไขข้อมูลใดๆ |
+| `PARENT` | `/my-child`, `/passbook` ของลูกตัวเอง, บัญชีของฉัน | ดูยอดและประวัติของลูก (ดูได้หลายคน) |
 
 ข้อมูลหลัก: `AcademicYear` (ปี พ.ศ., active ทีละปี) → `Classroom` → `Student` →
-`Account` (1 บัญชี/คน/ปี) → `Transaction` (ฝาก/ถอน)
+`Account` (1 บัญชี/คน/ปี) → `Transaction` (ฝาก/ถอน · category `REGULAR`/`INTEREST`)
+
+ตารางประกอบ: `SchoolSetting` (ชื่อ/สังกัด/โลโก้), `Guardian` (ผู้ปกครอง↔นักเรียน แบบหลายต่อหลาย),
+`AuditLog` (บันทึกการใช้งาน), `CashClosing` (ปิดยอดเงินสดรายวัน), `LineLinkCode` (ผูก LINE)
 
 หลักการบัญชีที่ระบบรักษาเสมอ:
 
@@ -35,14 +77,19 @@
 
 | Username | Password | Role | หมายเหตุ |
 |---|---|---|---|
-| `admin` | `admin1234` | ADMIN | "ครูการเงิน" |
+| `admin` | `admin1234` | ADMIN | ครูการเงิน (ผู้ดูแลระบบ) |
 | `teacher1` | `teacher1234` | TEACHER | ครูสุดารัตน์ ใจงาม — ประจำชั้น ป.1/1 |
-| `parent1` | `parent1234` | PARENT | นางไพลิน สายบุตร — ผูกกับนักเรียน 69001 (ด.ช.กิตติศักดิ์ สายบุตร) |
+| `executive1` | `exec1234` | EXECUTIVE | ผู้อำนวยการ — ดูภาพรวมอย่างเดียว |
+| `parent1` | `parent1234` | PARENT | นางไพลิน สายบุตร — ผูกกับนักเรียน 69001 + 69002 (เดโมผู้ปกครองหลายลูก) |
 
 seed สร้างเพิ่ม: ปีการศึกษา 2569 (active), ห้อง ป.1/1–ป.6/1, นักเรียนตัวอย่าง 20 คน
 (รหัส 69001–69020) พร้อมธุรกรรมย้อนหลัง 18 พ.ค. – 1 ก.ค. 2569
 
-> คำเตือน: seed **ล้างข้อมูลเดิมทั้งหมด**ก่อนใส่ข้อมูลตัวอย่าง — ห้ามรันกับฐานข้อมูลที่ใช้งานจริงแล้ว
+> ⚠️ **เปลี่ยนรหัสผ่านทุกบัญชีทันทีหลังติดตั้งจริง** — รหัสด้านบนเป็นค่าเริ่มต้นที่เปิดเผยในเอกสาร
+> เปลี่ยนได้ที่เมนู "บัญชีของฉัน" หรือให้ ADMIN รีเซ็ตที่เมนู "ผู้ใช้"
+
+> คำเตือน: seed มี guard กันข้อมูลจริง — จะ**ล้างข้อมูลเดิมทั้งหมด**ก่อนใส่ข้อมูลตัวอย่าง
+> จึงหยุดทำงานถ้าฐานข้อมูลมีข้อมูลอยู่แล้ว (ต้องตั้ง `FORCE_SEED=1` เพื่อยืนยันบังคับ) — ห้ามรันกับ DB ที่ใช้งานจริง
 
 ## เปลี่ยนชื่อโรงเรียน / โลโก้
 
@@ -137,6 +184,22 @@ docker compose down -v            # หยุด + ลบข้อมูล DB �
 
 ## Backup / Restore ฐานข้อมูล
 
+### สำรองอัตโนมัติ (มีมาให้แล้ว)
+
+docker compose มี service **`db-backup`** ที่ `pg_dump` ฐานข้อมูลลง named volume `backups`
+**ทุก 24 ชั่วโมงโดยอัตโนมัติ** และเก็บ 14 ไฟล์ล่าสุด (ลบเก่ากว่านั้นทิ้งเอง) — ไม่ต้องตั้ง crontab เอง
+
+```bash
+docker compose ps db-backup                          # ดูว่า service ทำงานอยู่
+docker compose exec db-backup ls -lh /backups        # ดูไฟล์ backup ที่มี
+docker compose cp db-backup:/backups ./backups-copy   # คัดลอกไฟล์ backup ออกมานอก container
+```
+
+> แนะนำให้ตั้ง cron บนเครื่อง host คัดลอกโฟลเดอร์ backup ไป**เก็บนอกเครื่อง server** อย่างน้อยสัปดาห์ละครั้ง
+> (volume อยู่บนเครื่องเดียวกับ DB — ถ้าเครื่องเสียก็หายทั้งคู่)
+
+### สำรองด้วยมือ (เมื่อต้องการทันที)
+
 ```bash
 # backup เป็นไฟล์ SQL (รันได้ระหว่างระบบทำงานปกติ)
 docker compose exec -T db pg_dump -U savings -d school_savings \
@@ -145,12 +208,6 @@ docker compose exec -T db pg_dump -U savings -d school_savings \
 # หรือ custom format (ไฟล์เล็กกว่า, restore เลือกบางส่วนได้ด้วย pg_restore)
 docker compose exec -T db pg_dump -U savings -d school_savings -Fc \
   > backup_school_savings_$(date +%Y%m%d_%H%M).dump
-```
-
-ตั้ง backup อัตโนมัติทุกวัน (ตัวอย่าง crontab บนเครื่อง host, ตี 1):
-
-```cron
-0 1 * * * cd /path/to/school-savings && docker compose exec -T db pg_dump -U savings -d school_savings > backups/backup_$(date +\%Y\%m\%d).sql
 ```
 
 Restore (หยุดแอปก่อนกันเขียนชนกัน แล้วเทลง DB เปล่า):
@@ -170,23 +227,31 @@ docker compose start app
 
 ```
 ├── prisma/
-│   ├── schema.prisma        # โมเดล: User, AcademicYear, Classroom, Student, Account, Transaction
+│   ├── schema.prisma        # โมเดล: User, AcademicYear, Classroom, Student, Account, Transaction,
+│   │                        #   SchoolSetting, Guardian, AuditLog, CashClosing, LineLinkCode
 │   ├── migrations/          # เกิดจาก `prisma migrate dev` (ต้อง commit — ใช้ตอน deploy)
-│   └── seed.ts              # ข้อมูลตัวอย่าง + บัญชีทดสอบ
+│   └── seed.ts              # ข้อมูลตัวอย่าง + บัญชีทดสอบ (มี guard กันข้อมูลจริง)
 ├── src/
-│   ├── middleware.ts        # ด่านแรก: บังคับ login + แบ่งโซนตาม role
+│   ├── middleware.ts        # ด่านแรก: บังคับ login + แบ่งโซนตาม role (รวม EXECUTIVE read-only)
 │   ├── app/
 │   │   ├── login/           # หน้าเข้าสู่ระบบ (public)
-│   │   ├── (app)/           # หน้าในระบบ (มี Sidebar/Topbar): dashboard, transactions,
-│   │   │                    #   students, reports, classrooms, academic-years, users,
-│   │   │                    #   my-child, passbook
-│   │   └── api/             # route handlers (auth, transactions, stats, ...)
-│   ├── components/          # ui/ (Button, Card, Table, ...), layout/, charts/
-│   └── lib/                 # auth (session/role guard), db (prisma), money, thai-date
+│   │   ├── manifest.ts      # PWA manifest (ชื่อ/ไอคอนจากตั้งค่าโรงเรียน)
+│   │   ├── (app)/           # หน้าในระบบ (มี Sidebar/Topbar): dashboard, transactions(+new),
+│   │   │                    #   students(+[id]), passbook(+certificate), reports(classroom/
+│   │   │                    #   yearly/ledger), cash-closing, interest, classrooms,
+│   │   │                    #   academic-years, users, settings, audit, account, my-child
+│   │   └── api/             # auth, transactions, stats, reports, export(xlsx), settings,
+│   │                        #   branding(logo), cash-closing, interest, users, guardians,
+│   │                        #   account, files(รูปนักเรียน), line(webhook/link-code)
+│   ├── components/          # ui/, layout/, charts/ (MonthlyChart, SavingsTrendChart),
+│   │                        #   TransactionSlip, StudentAvatar, MilestoneBadges, LineLinkCard
+│   └── lib/                 # auth, db, money, thai-date, settings, audit, files, notify, milestones
 ├── public/
-│   └── logo.png             # โลโก้ระบบ 512×512 — แทนที่ด้วยตราโรงเรียนของท่าน (ดูหัวข้อ "เปลี่ยนโลโก้ระบบ")
+│   ├── logo.png             # โลโก้ fallback 512×512 (ถ้ายังไม่อัปโหลดผ่าน /settings)
+│   └── icon-192/512.png     # ไอคอน PWA
+├── uploads/                 # ไฟล์อัปโหลด (โลโก้, รูปนักเรียน) — gitignored, เป็น volume ใน compose
 ├── Dockerfile               # multi-stage: deps -> build -> runner (standalone)
-├── docker-compose.yml       # app + postgres:17 (db ไม่ expose ออก host)
+├── docker-compose.yml       # app + postgres:17 + db-backup (db ไม่ expose ออก host)
 └── .env.example             # ตัวอย่าง environment variables
 ```
 
