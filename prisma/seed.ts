@@ -7,9 +7,10 @@
  * ไม่ล้างข้อมูล — ต้องตั้ง FORCE_SEED=1 เท่านั้นจึงจะล้างและ seed ใหม่
  *
  * สร้าง:
- * - ปีการศึกษา 2569 (active)
+ * - ปีการศึกษา 2569 (active) + SchoolSetting (ตั้งค่าโรงเรียน แถว singleton id=1)
  * - users: admin/admin1234 (ADMIN "ครูการเงิน"), teacher1/teacher1234 (TEACHER ประจำ ป.1/1),
- *          parent1/parent1234 (PARENT ผูกกับนักเรียนคนแรก)
+ *          executive1/exec1234 (EXECUTIVE "ผู้อำนวยการ" read-only),
+ *          parent1/parent1234 (PARENT ผูกกับนักเรียน 2 คน 69001+69002 ผ่าน Guardian)
  * - ห้องเรียน ป.1/1 ถึง ป.6/1
  * - นักเรียนตัวอย่าง 20 คน + บัญชีปี 2569 ทุกคน
  * - ธุรกรรมย้อนหลัง ~2 เดือน (18 พ.ค. 2569 - 1 ก.ค. 2569) ฝากถี่ ถอนบ้าง
@@ -107,11 +108,30 @@ async function main() {
 
   // ---------- ล้างข้อมูลเดิม (เรียงตาม FK dependency) ----------
   await prisma.transaction.deleteMany();
+  await prisma.guardian.deleteMany();
+  await prisma.lineLinkCode.deleteMany();
+  await prisma.cashClosing.deleteMany();
+  await prisma.auditLog.deleteMany();
   await prisma.account.deleteMany();
   await prisma.user.deleteMany();
   await prisma.student.deleteMany();
   await prisma.classroom.deleteMany();
   await prisma.academicYear.deleteMany();
+
+  // ---------- ตั้งค่าโรงเรียน (singleton id=1) ----------
+  await prisma.schoolSetting.upsert({
+    where: { id: 1 },
+    update: {
+      schoolName: "โรงเรียนบ้านกะดาด",
+      schoolArea: "สพป.สุรินทร์ เขต 3",
+      logoFileName: null,
+    },
+    create: {
+      id: 1,
+      schoolName: "โรงเรียนบ้านกะดาด",
+      schoolArea: "สพป.สุรินทร์ เขต 3",
+    },
+  });
 
   // ---------- ปีการศึกษา 2569 ----------
   const year2569 = await prisma.academicYear.create({
@@ -138,6 +158,16 @@ async function main() {
       passwordHash: await bcrypt.hash("teacher1234", 10),
       role: "TEACHER",
       name: "ครูสุดารัตน์ ใจงาม",
+    },
+  });
+
+  // ผู้บริหาร (read-only) — ดูแดชบอร์ด/ธุรกรรม/นักเรียน/รายงานได้ แต่แก้ไขไม่ได้
+  await prisma.user.create({
+    data: {
+      username: "executive1",
+      passwordHash: await bcrypt.hash("exec1234", 10),
+      role: "EXECUTIVE",
+      name: "ผู้อำนวยการ",
     },
   });
 
@@ -170,15 +200,21 @@ async function main() {
     students.push({ id: student.id, classroom: s.classroom, firstName: s.firstName });
   }
 
-  // ---------- parent1 ผูกกับนักเรียนคนแรก ----------
-  await prisma.user.create({
+  // ---------- parent1 ผูกกับนักเรียน 2 คน (69001 + 69002) ผ่าน Guardian ----------
+  // (เดโมฟีเจอร์ "ผู้ปกครองหลายลูก")
+  const parent1 = await prisma.user.create({
     data: {
       username: "parent1",
       passwordHash: await bcrypt.hash("parent1234", 10),
       role: "PARENT",
       name: "นางไพลิน สายบุตร",
-      linkedStudentId: students[0].id,
     },
+  });
+  await prisma.guardian.createMany({
+    data: [
+      { userId: parent1.id, studentId: students[0].id }, // 69001
+      { userId: parent1.id, studentId: students[1].id }, // 69002
+    ],
   });
 
   // ---------- บัญชีปี 2569 + ธุรกรรมย้อนหลัง ~2 เดือน ----------
@@ -271,8 +307,11 @@ async function main() {
 
   console.log("");
   console.log("seed สำเร็จ:");
-  console.log(`  ปีการศึกษา 2569 (active)`);
-  console.log(`  ผู้ใช้ 3 คน: admin/admin1234, teacher1/teacher1234, parent1/parent1234`);
+  console.log(`  ปีการศึกษา 2569 (active) + ตั้งค่าโรงเรียน (SchoolSetting id=1)`);
+  console.log(
+    `  ผู้ใช้ 4 คน: admin/admin1234, teacher1/teacher1234, executive1/exec1234, parent1/parent1234`
+  );
+  console.log(`  parent1 ผูกบุตร 2 คน (69001, 69002) ผ่าน Guardian`);
   console.log(`  ห้องเรียน ${CLASSROOM_NAMES.length} ห้อง, นักเรียน ${students.length} คน`);
   console.log(`  ธุรกรรมรวม ${totalTxns} รายการ (18 พ.ค. - 1 ก.ค. 2569)`);
 }

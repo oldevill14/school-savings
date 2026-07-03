@@ -1,6 +1,10 @@
 // ระบบออมทรัพย์โรงเรียนบ้านกะดาด — Prisma schema
 // หลักการสำคัญ: ธุรกรรมห้ามลบ (immutable) — ยกเลิกได้ด้วยการตั้ง status = VOIDED เท่านั้น
 // ยอดคงเหลือ (Account.balance) ต้องตรวจสอบย้อนหลังได้จากผลรวม Transaction ที่ status = NORMAL
+//
+// รอบขยายฟีเจอร์ (2569-07): เพิ่ม EXECUTIVE, SchoolSetting, Guardian (แทน User.linkedStudentId),
+// AuditLog, CashClosing, LineLinkCode, Transaction.category, User.lineUserId/mustChangePassword,
+// Student.photoFileName — ดูรายละเอียดใน CONTRACTS.md หัวข้อ "รอบขยายฟีเจอร์"
 
 generator client {
   provider = "prisma-client-js"
@@ -15,6 +19,7 @@ enum Role {
   ADMIN
   TEACHER
   PARENT
+  EXECUTIVE // ผู้บริหาร (read-only) — เพิ่มรอบขยายฟีเจอร์
 }
 
 enum StudentStatus {
@@ -33,15 +38,23 @@ enum TransactionStatus {
   VOIDED
 }
 
+// ประเภทธุรกรรม: ปกติ (ฝาก-ถอนทั่วไป) หรือ ดอกเบี้ยรายปี
+enum TransactionCategory {
+  REGULAR
+  INTEREST
+}
+
 model User {
-  id              String  @id @default(cuid())
-  username        String  @unique
-  passwordHash    String
-  role            Role
-  name            String
-  // PARENT เท่านั้น: ผูกกับนักเรียนที่เป็นลูกของตน
-  linkedStudentId String?
-  linkedStudent   Student? @relation("ParentLink", fields: [linkedStudentId], references: [id])
+  id           String  @id @default(cuid())
+  username     String  @unique
+  passwordHash String
+  role         Role
+  name         String
+
+  // LINE integration (ฟีเจอร์แจ้งเตือน) — lineUserId ผูก 1 บัญชี LINE ต่อ 1 ผู้ใช้
+  lineUserId String? @unique
+  // บังคับเปลี่ยนรหัสผ่านครั้งถัดไปที่ล็อกอิน (เช่น หลังแอดมินรีเซ็ตรหัส)
+  mustChangePassword Boolean @default(false)
 
   // ครูประจำชั้น (Classroom.teacherId)
   homeroomClassrooms Classroom[] @relation("HomeroomTeacher")
@@ -49,9 +62,76 @@ model User {
   recordedTransactions Transaction[] @relation("RecordedBy")
   voidedTransactions   Transaction[] @relation("VoidedBy")
 
+  // ผู้ปกครอง -> นักเรียน (many-to-many ผ่าน Guardian) แทน linkedStudentId เดิม
+  guardians Guardian[]
+
+  // ปิดยอดเงินสดที่ผู้ใช้คนนี้เป็นผู้ปิด
+  cashClosings CashClosing[] @relation("CashClosedBy")
+
+  // โค้ดผูกบัญชี LINE ที่ออกให้ผู้ใช้คนนี้
+  lineLinkCodes LineLinkCode[] @relation("LineLinkCodes")
+
+  createdAt DateTime @default(now())
+}
+
+// ตั้งค่าโรงเรียน — แถวเดียว (singleton, id = 1) แทนชื่อโรงเรียนที่ hardcode
+model SchoolSetting {
+  id           Int      @id @default(1)
+  schoolName   String
+  schoolArea   String
+  logoFileName String?
+  updatedAt    DateTime @updatedAt
+}
+
+// ผู้ปกครอง <-> นักเรียน (1 ผู้ปกครองผูกได้หลายลูก) — แทน User.linkedStudentId เดิม
+model Guardian {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
   createdAt DateTime @default(now())
 
-  @@index([linkedStudentId])
+  @@unique([userId, studentId])
+  @@index([studentId])
+}
+
+// บันทึกการกระทำสำคัญ (audit trail) — userId เป็น String? (cuid ของ User) ไม่มี FK
+// เพื่อให้ log อยู่รอดแม้ผู้ใช้ถูกลบ และ logAudit เป็น fire-and-forget
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+// ปิดยอดเงินสดรายวัน — scope = "ALL" (ทั้งโรงเรียน) หรือ classroomId (รายห้อง)
+model CashClosing {
+  id            String   @id @default(cuid())
+  closeDate     DateTime
+  scope         String
+  expectedNet   Decimal  @db.Decimal(12, 2)
+  countedAmount Decimal  @db.Decimal(12, 2)
+  note          String?
+  closedById    String
+  closedBy      User     @relation("CashClosedBy", fields: [closedById], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@unique([closeDate, scope])
+}
+
+// โค้ดชั่วคราวสำหรับผูกบัญชี LINE เข้ากับผู้ใช้
+model LineLinkCode {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  userId    String
+  user      User      @relation("LineLinkCodes", fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
 }
 
 model AcademicYear {
@@ -87,9 +167,11 @@ model Student {
   classroomId String
   classroom   Classroom     @relation(fields: [classroomId], references: [id])
   status      StudentStatus @default(ACTIVE)
+  // ชื่อไฟล์รูปนักเรียน (เก็บใน UPLOADS_DIR/students) — null = ยังไม่มีรูป
+  photoFileName String?
 
-  accounts Account[]
-  parents  User[]    @relation("ParentLink")
+  accounts  Account[]
+  guardians Guardian[]
 
   @@index([classroomId])
 }
@@ -112,11 +194,13 @@ model Account {
 }
 
 model Transaction {
-  id        String          @id @default(cuid())
+  id        String              @id @default(cuid())
   accountId String
-  account   Account         @relation(fields: [accountId], references: [id])
+  account   Account             @relation(fields: [accountId], references: [id])
   type      TransactionType
-  amount    Decimal         @db.Decimal(12, 2) // ต้อง > 0 เสมอ (ตรวจฝั่งแอป)
+  // ประเภท: REGULAR (ฝาก-ถอนปกติ) หรือ INTEREST (ดอกเบี้ยรายปีที่ระบบจ่าย)
+  category  TransactionCategory @default(REGULAR)
+  amount    Decimal             @db.Decimal(12, 2) // ต้อง > 0 เสมอ (ตรวจฝั่งแอป)
   txnDate   DateTime // วันที่ทำรายการจริง (ครูอาจบันทึกย้อนหลัง)
 
   recordedById String

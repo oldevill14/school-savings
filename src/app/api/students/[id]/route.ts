@@ -56,7 +56,7 @@ export async function GET(
     if (!student) return jsonError("ไม่พบข้อมูลนักเรียน", 404);
 
     // สิทธิ์: PARENT ดูได้เฉพาะบุตรที่ผูกไว้ / TEACHER เฉพาะนักเรียนในห้องตนเอง
-    if (session.role === "PARENT" && session.linkedStudentId !== student.id) {
+    if (session.role === "PARENT" && !session.studentIds.includes(student.id)) {
       return jsonError("ไม่มีสิทธิ์เข้าถึงข้อมูลนักเรียนคนนี้", 403);
     }
     if (session.role === "TEACHER" && student.classroom.teacherId !== session.userId) {

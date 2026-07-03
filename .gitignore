@@ -27,3 +27,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ไฟล์อัปโหลด (โลโก้โรงเรียน, รูปนักเรียน) — ไม่ commit ลง git (เก็บบนดิสก์/volume เท่านั้น)
+/uploads
+# ไฟล์ backup ฐานข้อมูล (pg_dump) — เก็บนอก git
+/backups
+*.sql
+*.dump

@@ -1,10 +1,14 @@
 /**
  * /my-child — มุมผู้ปกครอง (PARENT เท่านั้น) — mobile-first
  *
- * - BalanceCard ใหญ่เห็นยอดคงเหลือใน 1 จอแรกโดยไม่ต้อง scroll
+ * - รองรับผู้ปกครองหลายบุตร: มีแถบสลับบุตร (?child=<studentId>) เมื่อผูกไว้มากกว่า 1 คน
+ *   ลูกเดียว = UX เดิม (ไม่มีแถบสลับ)
+ * - BalanceCard ใหญ่เห็นยอดคงเหลือของบุตรที่เลือกใน 1 จอแรกโดยไม่ต้อง scroll
+ * - ตราสัญลักษณ์นักออม (MilestoneBadges) + กราฟยอดสะสมรายเดือน (SavingsTrendChart)
  * - ประวัติฝาก-ถอน 20 รายการล่าสุด + ปุ่ม "ดูสมุดบัญชี" ไป /passbook/[studentId]
- * - ดึงข้อมูลจาก session.linkedStudentId เท่านั้น (ตรวจฝั่ง server) —
- *   ผู้ปกครองเห็นได้เฉพาะบัญชีของลูกตนเอง
+ *
+ * ความปลอดภัย: ดึงข้อมูลเฉพาะ session.studentIds (ตรวจฝั่ง server) — ผู้ปกครอง
+ * เห็นได้เฉพาะบัญชีของบุตรตนเอง; ค่า ?child ต้องอยู่ใน studentIds เท่านั้น
  */
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
@@ -16,15 +20,24 @@ import { cn } from "@/lib/utils";
 import BalanceCard from "@/components/BalanceCard";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import MilestoneBadges from "@/components/MilestoneBadges";
+import LineLinkCard from "@/components/LineLinkCard";
+import SavingsTrendChart from "@/components/charts/SavingsTrendChart";
+import { buildSavingsTrend, type MilestoneTxn } from "@/lib/milestones";
 import { Table, THead, TBody, TR, TH, TD, TableEmpty } from "@/components/ui/Table";
 
 export const dynamic = "force-dynamic";
 
-export default async function MyChildPage() {
+export default async function MyChildPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ child?: string }>;
+}) {
   const session = await requireRole(["PARENT"]);
+  const ids = session.studentIds;
 
   // ผู้ปกครองต้องถูกผูกกับนักเรียนก่อนจึงเห็นข้อมูลได้
-  if (!session.linkedStudentId) {
+  if (ids.length === 0) {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4">
         <h1 className="text-xl">ยอดของลูก</h1>
@@ -38,12 +51,13 @@ export default async function MyChildPage() {
     );
   }
 
-  const student = await prisma.student.findUnique({
-    where: { id: session.linkedStudentId },
-    include: { classroom: true },
+  const children = await prisma.student.findMany({
+    where: { id: { in: ids } },
+    include: { classroom: { select: { name: true } } },
+    orderBy: { studentCode: "asc" },
   });
 
-  if (!student) {
+  if (children.length === 0) {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4">
         <h1 className="text-xl">ยอดของลูก</h1>
@@ -57,16 +71,24 @@ export default async function MyChildPage() {
     );
   }
 
-  // บัญชีของปีการศึกษาที่ active — ถ้าไม่มี ใช้บัญชีปีล่าสุดแทน (เช่น ช่วงคาบเกี่ยวเปลี่ยนปี)
-  const activeYear = await prisma.academicYear.findFirst({
-    where: { isActive: true },
-  });
+  // บุตรที่เลือก — ?child ต้องเป็นหนึ่งใน studentIds ของผู้ปกครองเท่านั้น (กันสวมสิทธิ์)
+  const sp = await searchParams;
+  const selected =
+    (sp.child && ids.includes(sp.child)
+      ? children.find((c) => c.id === sp.child)
+      : undefined) ?? children[0];
+
+  const studentName = `${selected.firstName} ${selected.lastName}`;
+  const multi = children.length > 1;
+
+  // บัญชีของปีการศึกษาที่ active — ถ้าไม่มี ใช้บัญชีปีล่าสุดแทน (ช่วงคาบเกี่ยวเปลี่ยนปี)
+  const activeYear = await prisma.academicYear.findFirst({ where: { isActive: true } });
 
   let account = activeYear
     ? await prisma.account.findUnique({
         where: {
           studentId_academicYearId: {
-            studentId: student.id,
+            studentId: selected.id,
             academicYearId: activeYear.id,
           },
         },
@@ -76,21 +98,52 @@ export default async function MyChildPage() {
 
   if (!account) {
     account = await prisma.account.findFirst({
-      where: { studentId: student.id },
+      where: { studentId: selected.id },
       orderBy: { academicYear: { year: "desc" } },
       include: { academicYear: true },
     });
   }
 
-  const studentName = `${student.firstName} ${student.lastName}`;
+  // แถบสลับบุตร (แสดงเมื่อมีมากกว่า 1 คน)
+  const childSwitcher = multi ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-slate-500">บุตรของท่าน:</span>
+      {children.map((c) => (
+        <Link
+          key={c.id}
+          href={`/my-child?child=${c.id}`}
+          className={cn(
+            "rounded-full border px-3 py-1 text-sm transition-colors",
+            c.id === selected.id
+              ? "border-navy bg-navy font-medium text-white"
+              : "border-line bg-white text-slate-600 hover:bg-slate-50"
+          )}
+        >
+          {c.firstName} {c.lastName}
+        </Link>
+      ))}
+    </div>
+  ) : null;
+
+  const header = (
+    <div>
+      <h1 className="text-xl">ยอดของลูก</h1>
+      {account && (
+        <p className="mt-0.5 text-sm text-slate-500">
+          ปีการศึกษา {account.academicYear.year}
+        </p>
+      )}
+    </div>
+  );
 
   if (!account) {
     return (
       <div className="mx-auto w-full max-w-lg space-y-4">
-        <h1 className="text-xl">ยอดของลูก</h1>
+        {header}
+        {childSwitcher}
         <Card title="ยังไม่มีบัญชีออมทรัพย์">
           <p className="text-sm text-slate-600">
-            {studentName} ({student.studentCode}) ยังไม่มีบัญชีออมทรัพย์ในระบบ
+            {studentName} ({selected.studentCode}) ยังไม่มีบัญชีออมทรัพย์ในระบบ
             กรุณาติดต่อครูประจำชั้นเพื่อเปิดบัญชี
           </p>
         </Card>
@@ -98,39 +151,63 @@ export default async function MyChildPage() {
     );
   }
 
-  const transactions = await prisma.transaction.findMany({
+  const allTxns = await prisma.transaction.findMany({
     where: { accountId: account.id },
-    orderBy: [{ txnDate: "desc" }, { createdAt: "desc" }],
-    take: 20,
+    orderBy: [{ txnDate: "asc" }, { createdAt: "asc" }],
   });
 
-  const lastTxnDate = transactions[0]?.txnDate;
+  // ข้อมูลย่อสำหรับกราฟ/ตราสัญลักษณ์ (Prisma Decimal -> number)
+  const txnData: MilestoneTxn[] = allTxns.map((t) => ({
+    type: t.type,
+    status: t.status,
+    txnDate: t.txnDate,
+    amount: Number(t.amount),
+  }));
+
+  const recent = [...allTxns].reverse().slice(0, 20); // ใหม่สุดก่อน
+  const lastNormalTxn = [...allTxns].reverse().find((t) => t.status === "NORMAL");
+  const trend = buildSavingsTrend(Number(account.openingBalance), txnData);
 
   return (
     <div className="mx-auto w-full max-w-lg space-y-4">
-      <div>
-        <h1 className="text-xl">ยอดของลูก</h1>
-        <p className="mt-0.5 text-sm text-slate-500">
-          ปีการศึกษา {account.academicYear.year}
-        </p>
-      </div>
+      {header}
+      {childSwitcher}
 
       {/* ยอดคงเหลือ — ต้องเห็นใน 1 จอแรกบนมือถือ */}
       <BalanceCard
         studentName={studentName}
-        studentCode={student.studentCode}
-        classroomName={student.classroom.name}
+        studentCode={selected.studentCode}
+        classroomName={selected.classroom.name}
         balance={account.balance.toString()}
-        updatedAt={lastTxnDate}
+        updatedAt={lastNormalTxn?.txnDate}
       />
 
       <Link
-        href={`/passbook/${student.id}`}
+        href={`/passbook/${selected.id}`}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-navy-light"
       >
         <BookOpen className="h-4 w-4" />
         ดูสมุดบัญชี
       </Link>
+
+      {/* รับแจ้งเตือนผ่าน LINE (ผูกเป็นราย "ผู้ใช้" ไม่ผูกกับบุตรคนใดคนหนึ่ง) */}
+      <LineLinkCard />
+
+      {/* ตราสัญลักษณ์นักออม */}
+      <Card title="ตราสัญลักษณ์นักออม">
+        <MilestoneBadges
+          balance={Number(account.balance)}
+          transactions={txnData}
+          showLocked
+        />
+      </Card>
+
+      {/* กราฟยอดสะสมรายเดือน — แสดงเมื่อมีข้อมูลอย่างน้อย 2 เดือน */}
+      {trend.length >= 2 && (
+        <Card title="กราฟการออม (ยอดสะสมรายเดือน)">
+          <SavingsTrendChart data={trend} />
+        </Card>
+      )}
 
       {/* ประวัติ 20 รายการล่าสุด */}
       <section className="space-y-3">
@@ -144,7 +221,7 @@ export default async function MyChildPage() {
             </TR>
           </THead>
           <TBody>
-            {transactions.map((t) => {
+            {recent.map((t) => {
               const voided = t.status === "VOIDED";
               const isDeposit = t.type === "DEPOSIT";
               return (
@@ -192,7 +269,7 @@ export default async function MyChildPage() {
                 </TR>
               );
             })}
-            {transactions.length === 0 && (
+            {recent.length === 0 && (
               <TableEmpty colSpan={3} message="ยังไม่มีรายการฝาก-ถอน" />
             )}
           </TBody>

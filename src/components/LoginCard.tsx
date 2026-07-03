@@ -40,9 +40,18 @@ export interface LoginCardProps {
   nextPath?: string | null;
   /** ปีการศึกษาที่เปิดใช้งาน (พ.ศ.) — null ถ้ายังไม่มีปี active ใน DB */
   year?: number | null;
+  /** ชื่อโรงเรียน (จาก getSchoolSetting) — ส่งมาจาก server component หน้า /login */
+  schoolName?: string;
+  /** สังกัด/เขตพื้นที่ (จาก getSchoolSetting) */
+  schoolArea?: string;
 }
 
-export default function LoginCard({ nextPath = null, year = null }: LoginCardProps) {
+export default function LoginCard({
+  nextPath = null,
+  year = null,
+  schoolName = "โรงเรียนบ้านกะดาด",
+  schoolArea = "สพป.สุรินทร์ เขต 3",
+}: LoginCardProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -99,15 +108,16 @@ export default function LoginCard({ nextPath = null, year = null }: LoginCardPro
         {/* mobile: ย่อเป็น header แถบบน */}
         <div className="flex items-center gap-3 px-5 py-4 lg:hidden">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10 ring-2 ring-gold">
-            {/* โลโก้ระบบ — เปลี่ยนได้โดยแทนที่ไฟล์ public/logo.png (ดู README หัวข้อ "เปลี่ยนโลโก้") */}
-            <img src="/logo.png" alt="ตราโรงเรียน" className="h-8 w-8 object-contain" />
+            {/* โลโก้ระบบ — เปลี่ยนได้ที่หน้า /settings (อัปโหลด) หรือแทนไฟล์ public/logo.png (ดู README) */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/api/branding/logo.png" alt="ตราโรงเรียน" className="h-8 w-8 object-contain" />
           </div>
           <div className="min-w-0">
             <p className="truncate text-base font-semibold text-white">
               ระบบออมทรัพย์โรงเรียน
             </p>
             <p className="truncate text-xs text-white/70">
-              โรงเรียนบ้านกะดาด สพป.สุรินทร์ เขต 3
+              {schoolName} {schoolArea}
             </p>
           </div>
         </div>
@@ -115,15 +125,16 @@ export default function LoginCard({ nextPath = null, year = null }: LoginCardPro
         {/* desktop: แผงเต็มความสูง */}
         <div className="hidden h-full flex-col p-10 lg:flex">
           <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-white/10 ring-2 ring-gold">
-            {/* โลโก้ระบบ — เปลี่ยนได้โดยแทนที่ไฟล์ public/logo.png (ดู README หัวข้อ "เปลี่ยนโลโก้") */}
-            <img src="/logo.png" alt="ตราโรงเรียน" className="h-14 w-14 object-contain" />
+            {/* โลโก้ระบบ — เปลี่ยนได้ที่หน้า /settings (อัปโหลด) หรือแทนไฟล์ public/logo.png (ดู README) */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/api/branding/logo.png" alt="ตราโรงเรียน" className="h-14 w-14 object-contain" />
           </div>
 
           <h1 className="mt-6 text-2xl font-semibold leading-snug text-white">
             ระบบออมทรัพย์โรงเรียน
           </h1>
           <p className="mt-1 text-sm text-white/75">
-            โรงเรียนบ้านกะดาด สพป.สุรินทร์ เขต 3
+            {schoolName} {schoolArea}
           </p>
 
           <ul className="mt-8 space-y-3">

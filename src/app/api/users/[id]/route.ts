@@ -13,6 +13,7 @@ import { randomInt } from "crypto";
 import { NextResponse } from "next/server";
 import { requireRoleApi, hashPassword, AuthError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { logAudit, AuditAction } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -76,9 +77,15 @@ export async function PATCH(
       const password = generatePassword(8);
       const updated = await prisma.user.update({
         where: { id: target.id },
-        data: { passwordHash: await hashPassword(password) },
+        // hash ใหม่ทับ prefix DISABLED: เดิม = บัญชีกลับมาใช้งานได้ด้วย
+        // + บังคับให้ผู้ใช้เปลี่ยนรหัสผ่านเองครั้งถัดไปที่ล็อกอิน (B2 เป็นผู้บังคับใช้ตอน login/account)
+        data: { passwordHash: await hashPassword(password), mustChangePassword: true },
       });
-      // hash ใหม่ทับ prefix DISABLED: เดิม = บัญชีกลับมาใช้งานได้ด้วย
+      await logAudit({
+        userId: session.userId,
+        action: AuditAction.PASSWORD_RESET,
+        detail: `รีเซ็ตรหัสผ่านของ ${target.username} (${target.name})`,
+      });
       return NextResponse.json({ ok: true, user: userSummary(updated), password });
     }
 
@@ -115,6 +122,11 @@ export async function PATCH(
         where: { id: target.id },
         data: { passwordHash: `${DISABLED_PREFIX}${target.passwordHash}` },
       });
+      await logAudit({
+        userId: session.userId,
+        action: AuditAction.USER_DISABLE,
+        detail: `ปิดใช้งานบัญชี ${target.username} (${target.name})`,
+      });
       return NextResponse.json({ ok: true, user: userSummary(updated) });
     }
 
@@ -129,6 +141,11 @@ export async function PATCH(
       const updated = await prisma.user.update({
         where: { id: target.id },
         data: { passwordHash: target.passwordHash.slice(DISABLED_PREFIX.length) },
+      });
+      await logAudit({
+        userId: session.userId,
+        action: AuditAction.USER_ENABLE,
+        detail: `เปิดใช้งานบัญชี ${target.username} (${target.name})`,
       });
       return NextResponse.json({ ok: true, user: userSummary(updated) });
     }

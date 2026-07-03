@@ -10,13 +10,23 @@ export interface SidebarProps {
   role: Role;
   /** ปีการศึกษาที่เปิดใช้งาน (พ.ศ.) — null ถ้ายังไม่มีปี active */
   year?: number | null;
+  /** ชื่อโรงเรียน (จาก getSchoolSetting) — default = ค่าเริ่มต้นของระบบ */
+  schoolName?: string;
+  /** สังกัด/เขตพื้นที่ (จาก getSchoolSetting) — แสดงท้าย sidebar */
+  schoolArea?: string;
 }
 
 /**
  * Sidebar หลัก (desktop เท่านั้น — มือถือใช้ MobileNav)
  * เมนูถูกกรองตาม role ผ่าน getNavItems
+ * ชื่อโรงเรียน/สังกัด/โลโก้ อ่านจากตั้งค่า (ส่งมาทาง prop จาก (app)/layout)
  */
-export default function Sidebar({ role, year = null }: SidebarProps) {
+export default function Sidebar({
+  role,
+  year = null,
+  schoolName = "โรงเรียนบ้านกะดาด",
+  schoolArea = "สพป.สุรินทร์ เขต 3",
+}: SidebarProps) {
   const pathname = usePathname();
   const items = getNavItems(role);
 
@@ -25,11 +35,12 @@ export default function Sidebar({ role, year = null }: SidebarProps) {
       {/* หัว sidebar */}
       <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">
         <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-gold/20">
-          {/* โลโก้ระบบ — เปลี่ยนได้โดยแทนที่ไฟล์ public/logo.png (ดู README หัวข้อ "เปลี่ยนโลโก้") */}
-          <img src="/logo.png" alt="ตราโรงเรียน" className="h-7 w-7 object-contain" />
+          {/* โลโก้ระบบ — เปลี่ยนได้ที่หน้า /settings (อัปโหลด) หรือแทนไฟล์ public/logo.png (ดู README) */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/api/branding/logo.png" alt="ตราโรงเรียน" className="h-7 w-7 object-contain" />
         </span>
-        <div>
-          <div className="text-sm font-semibold leading-tight">โรงเรียนบ้านกะดาด</div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold leading-tight">{schoolName}</div>
           <div className="text-xs text-white/60">ระบบออมทรัพย์นักเรียน</div>
         </div>
       </div>
@@ -66,7 +77,7 @@ export default function Sidebar({ role, year = null }: SidebarProps) {
             <br />
           </>
         )}
-        สพป.สุรินทร์ เขต 3
+        {schoolArea}
       </div>
     </aside>
   );

@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getSchoolSetting } from "@/lib/settings";
 import LoginCard from "@/components/LoginCard";
 
 export const metadata: Metadata = {
@@ -38,15 +39,21 @@ export default async function LoginPage({
   const { next } = await searchParams;
   const nextPath = sanitizeNextPath(next);
 
-  // ปีการศึกษาที่ active — แสดงบนหน้า login (ห้าม hardcode เพราะระบบปิดปี/เปิดปีใหม่ได้)
-  const activeYear = await prisma.academicYear.findFirst({
-    where: { isActive: true },
-    select: { year: true },
-  });
+  // ปีการศึกษาที่ active + ตั้งค่าโรงเรียน — แสดงบนหน้า login
+  // (ห้าม hardcode: ปิดปี/เปิดปีใหม่ได้ และชื่อ/สังกัดเปลี่ยนได้ที่ /settings)
+  const [activeYear, setting] = await Promise.all([
+    prisma.academicYear.findFirst({ where: { isActive: true }, select: { year: true } }),
+    getSchoolSetting(),
+  ]);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface p-4 sm:p-6 lg:p-8">
-      <LoginCard nextPath={nextPath} year={activeYear?.year ?? null} />
+      <LoginCard
+        nextPath={nextPath}
+        year={activeYear?.year ?? null}
+        schoolName={setting.schoolName}
+        schoolArea={setting.schoolArea}
+      />
     </main>
   );
 }

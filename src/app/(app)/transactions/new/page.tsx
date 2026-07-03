@@ -8,6 +8,7 @@
 import { PlusCircle } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getSchoolSetting } from "@/lib/settings";
 import Card from "@/components/ui/Card";
 import BatchDepositTable, {
   type BatchStudentRow,
@@ -22,6 +23,7 @@ interface PageProps {
 export default async function NewTransactionPage({ searchParams }: PageProps) {
   const session = await requireRole(["ADMIN", "TEACHER"]);
   const sp = await searchParams;
+  const school = await getSchoolSetting();
 
   const activeYear = await prisma.academicYear.findFirst({
     where: { isActive: true },
@@ -109,6 +111,9 @@ export default async function NewTransactionPage({ searchParams }: PageProps) {
         selectedClassroomId={selectedClassroom?.id ?? ""}
         lockClassroom={classrooms.length === 1}
         students={students}
+        schoolName={school.schoolName}
+        schoolArea={school.schoolArea}
+        recorderName={session.name}
       />
     </div>
   );

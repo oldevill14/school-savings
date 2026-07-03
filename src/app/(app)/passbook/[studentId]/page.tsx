@@ -3,7 +3,7 @@
  *
  * สิทธิ์ (ตรวจฝั่ง server):
  * - ADMIN / TEACHER: เปิดดูได้ทุกคน (ใช้ประกอบการบันทึก/ตรวจสอบ)
- * - PARENT: เปิดได้เฉพาะ studentId ที่ตรงกับ linkedStudentId ของตนเอง — คนอื่น 403
+ * - PARENT: เปิดได้เฉพาะ studentId ที่อยู่ใน session.studentIds ของตนเอง (บุตรที่ผูกไว้) — คนอื่น 403
  *
  * ยอดคงเหลือในตาราง = running balance คำนวณสดจาก transactions (เฉพาะ status NORMAL)
  * เริ่มจาก openingBalance — ตรวจสอบย้อนหลังได้เสมอ ไม่พึ่งค่า denormalized เพียงอย่างเดียว
@@ -12,15 +12,18 @@
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, School, ShieldAlert } from "lucide-react";
+import { ArrowLeft, ScrollText, ShieldAlert } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getSchoolSetting } from "@/lib/settings";
 import Card from "@/components/ui/Card";
 import BalanceCard from "@/components/BalanceCard";
 import PassbookTable, {
   PassbookPrintButton,
   type PassbookRow,
 } from "@/components/PassbookTable";
+import SavingsTrendChart from "@/components/charts/SavingsTrendChart";
+import { buildSavingsTrend, type MilestoneTxn } from "@/lib/milestones";
 import { formatBaht } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -43,12 +46,12 @@ export default async function PassbookPage({
   params: Promise<{ studentId: string }>;
   searchParams: Promise<{ year?: string }>;
 }) {
-  const session = await requireRole(["ADMIN", "TEACHER", "PARENT"]);
+  const session = await requireRole(["ADMIN", "TEACHER", "PARENT", "EXECUTIVE"]);
   const { studentId } = await params;
   const sp = await searchParams;
 
   // ---------- สิทธิ์สำคัญ: PARENT เปิดได้เฉพาะสมุดของบุตรที่ผูกไว้เท่านั้น ----------
-  if (session.role === "PARENT" && session.linkedStudentId !== studentId) {
+  if (session.role === "PARENT" && !session.studentIds.includes(studentId)) {
     return (
       <div className="mx-auto max-w-lg py-10">
         <Card className="text-center">
@@ -65,6 +68,8 @@ export default async function PassbookPage({
     );
   }
 
+  const school = await getSchoolSetting();
+
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: {
@@ -80,8 +85,19 @@ export default async function PassbookPage({
   if (!student) notFound();
 
   const fullName = `${student.firstName} ${student.lastName}`;
-  const backHref = session.role === "PARENT" ? "/my-child" : `/students/${student.id}`;
-  const backLabel = session.role === "PARENT" ? "ยอดของลูก" : "โปรไฟล์นักเรียน";
+  // EXECUTIVE เข้า /students/[id] ไม่ได้ (หน้านั้นสงวนให้ ADMIN/TEACHER) จึงย้อนไปหน้ารายชื่อแทน
+  const backHref =
+    session.role === "PARENT"
+      ? "/my-child"
+      : session.role === "EXECUTIVE"
+        ? "/students"
+        : `/students/${student.id}`;
+  const backLabel =
+    session.role === "PARENT"
+      ? "ยอดของลูก"
+      : session.role === "EXECUTIVE"
+        ? "รายชื่อนักเรียน"
+        : "โปรไฟล์นักเรียน";
 
   // ---------- เลือกปีการศึกษา (?year=2569) — default ปี active, ถัดมาปีล่าสุด ----------
   const yearParam = Number(sp.year);
@@ -163,6 +179,15 @@ export default async function PassbookPage({
     .find((t) => t.status === "NORMAL");
   const normalCount = transactions.filter((t) => t.status === "NORMAL").length;
 
+  // กราฟยอดสะสมรายเดือน (ธุรกรรมปกติ) — สร้างฝั่ง server ส่งเข้ากราฟ client
+  const trendData: MilestoneTxn[] = transactions.map((t) => ({
+    type: t.type,
+    status: t.status,
+    txnDate: t.txnDate,
+    amount: Number(t.amount),
+  }));
+  const trend = buildSavingsTrend(Number(account.openingBalance), trendData);
+
   return (
     <div className="space-y-4">
       {/* print CSS เฉพาะหน้านี้ — ซ่อน sidebar/topbar/mobile nav/ปุ่ม แล้วจัดหน้าให้อ่านชัดบน A4 */}
@@ -193,7 +218,16 @@ export default async function PassbookPage({
           </Link>
           <h1 className="mt-1 text-xl">สมุดบัญชีเงินฝาก</h1>
         </div>
-        <PassbookPrintButton />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/passbook/${student.id}/certificate?year=${account.academicYear.year}`}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-4 text-sm font-medium text-navy transition-colors hover:bg-slate-50"
+          >
+            <ScrollText className="h-4 w-4" />
+            เกียรติบัตร
+          </Link>
+          <PassbookPrintButton />
+        </div>
       </div>
 
       {/* เลือกปีการศึกษา (ไม่พิมพ์) */}
@@ -230,24 +264,37 @@ export default async function PassbookPage({
         />
       </div>
 
+      {/* กราฟยอดสะสมรายเดือน (ไม่พิมพ์) — แสดงเมื่อมีข้อมูลอย่างน้อย 2 เดือน */}
+      {trend.length >= 2 && (
+        <div className="print-hide">
+          <Card title="กราฟการออม (ยอดสะสมรายเดือน)">
+            <SavingsTrendChart data={trend} />
+          </Card>
+        </div>
+      )}
+
       {/* ---------- ตัวสมุดบัญชี (ส่วนที่พิมพ์) ---------- */}
       <div className="passbook-sheet card-surface p-5 lg:p-6">
         {/* หัวสมุด: ตราโรงเรียน + ชื่อระบบ */}
         <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-navy pb-4">
           <div className="flex items-center gap-3">
             <span
-              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-gold bg-navy"
+              className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-gold bg-navy"
               aria-hidden="true"
             >
-              <School className="h-7 w-7 text-gold-light" />
+              {/* ตราโรงเรียน — โลโก้ที่อัปโหลดจาก /settings (fallback: public/logo.png) */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/api/branding/logo.png"
+                alt="ตราโรงเรียน"
+                className="h-9 w-9 object-contain"
+              />
             </span>
             <div>
               <div className="text-lg font-bold leading-tight text-navy">
-                โรงเรียนบ้านกะดาด
+                {school.schoolName}
               </div>
-              <div className="text-sm text-slate-600">
-                สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสุรินทร์ เขต 3
-              </div>
+              <div className="text-sm text-slate-600">{school.schoolArea}</div>
               <div className="text-sm font-semibold text-gold-dark">
                 ระบบออมทรัพย์นักเรียน — สมุดบัญชีเงินฝาก
               </div>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getSchoolSetting } from "@/lib/settings";
 import { formatBaht } from "@/lib/money";
 import { formatThaiDateTime } from "@/lib/thai-date";
 import Badge from "@/components/ui/Badge";
@@ -11,6 +12,7 @@ import Select from "@/components/ui/Select";
 import { Table, THead, TBody, TR, TH, TD, TableEmpty } from "@/components/ui/Table";
 import StatCard from "@/components/StatCard";
 import PrintButton from "../PrintButton";
+import ExcelLinkButton from "../ExcelLinkButton";
 import { buildYearlyReport } from "../report-data";
 
 /**
@@ -50,8 +52,9 @@ export default async function YearlyReportPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireRole(["ADMIN", "TEACHER"]);
+  await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
   const sp = await searchParams;
+  const school = await getSchoolSetting();
 
   const years = await prisma.academicYear.findMany({
     orderBy: { year: "desc" },
@@ -88,7 +91,12 @@ export default async function YearlyReportPage({
             คำนวณจากธุรกรรมสถานะปกติทั้งหมด
           </p>
         </div>
-        {report && <PrintButton />}
+        {report && (
+          <div className="flex flex-wrap gap-2">
+            <ExcelLinkButton href={`/api/export/yearly-report?year=${report.year}`} />
+            <PrintButton />
+          </div>
+        )}
       </div>
 
       {years.length === 0 && (
@@ -124,10 +132,8 @@ export default async function YearlyReportPage({
         <div className="space-y-5">
           {/* หัวกระดาษเมื่อสั่งพิมพ์ */}
           <div className="print-only text-center text-slate-900">
-            <div className="text-lg font-bold">โรงเรียนบ้านกะดาด</div>
-            <div className="text-sm">
-              สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสุรินทร์ เขต 3
-            </div>
+            <div className="text-lg font-bold">{school.schoolName}</div>
+            <div className="text-sm">{school.schoolArea}</div>
             <div className="mt-2 text-base font-semibold">
               รายงานสรุปออมทรัพย์ประจำปีการศึกษา {report.year}
             </div>
@@ -243,6 +249,16 @@ export default async function YearlyReportPage({
               คงเหลือรวม = ยอดยกมาต้นปี ({formatBaht(report.totals.opening)} บาท) + รวมฝาก
               - รวมถอน · ไม่รวมรายการที่ถูกยกเลิก (VOIDED)
             </p>
+            {Number(report.totals.interest) > 0 && (
+              <div className="card-surface flex flex-wrap items-center justify-between gap-3 border-gold/40 bg-gold/5 p-3 text-sm">
+                <span className="font-medium text-slate-900">
+                  ดอกเบี้ยที่ระบบจ่ายทั้งปี (นับรวมอยู่ในยอดฝากแล้ว)
+                </span>
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {formatBaht(report.totals.interest)} บาท
+                </span>
+              </div>
+            )}
           </section>
 
           {/* ตารางสรุปรายเดือน */}

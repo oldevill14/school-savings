@@ -13,9 +13,11 @@ import { prisma } from "@/lib/db";
 import Card from "@/components/ui/Card";
 import Badge, { type BadgeVariant } from "@/components/ui/Badge";
 import BalanceCard from "@/components/BalanceCard";
+import MilestoneBadges from "@/components/MilestoneBadges";
 import { Table, THead, TBody, TR, TH, TD, TableEmpty } from "@/components/ui/Table";
 import { formatBaht } from "@/lib/money";
 import { formatThaiDate } from "@/lib/thai-date";
+import StudentPhotoManager from "./StudentPhotoManager";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +38,7 @@ export default async function StudentDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await requireRole(["ADMIN", "TEACHER"]);
+  const session = await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
   const { id } = await params;
 
   const student = await prisma.student.findUnique({
@@ -84,8 +86,19 @@ export default async function StudentDetailPage({
       })
     : [];
 
+  // ธุรกรรมทั้งหมดของบัญชีปี active (ย่อ) สำหรับคำนวณตราสัญลักษณ์นักออม
+  const milestoneTxns = activeAccount
+    ? await prisma.transaction.findMany({
+        where: { accountId: activeAccount.id },
+        select: { type: true, status: true, txnDate: true, amount: true },
+      })
+    : [];
+
   const lastNormalTxn = transactions.find((t) => t.status === "NORMAL");
   const fullName = `${student.firstName} ${student.lastName}`;
+  // จัดการรูปได้ = ADMIN หรือครูประจำชั้นของนักเรียนคนนี้ (TEACHER ที่มาถึงจุดนี้ผ่านการตรวจห้องแล้ว)
+  //               EXECUTIVE = อ่านอย่างเดียว ไม่จัดการรูป
+  const canManagePhoto = session.role === "ADMIN" || session.role === "TEACHER";
 
   return (
     <div className="space-y-4">
@@ -140,8 +153,16 @@ export default async function StudentDetailPage({
           )}
         </div>
 
-        {/* ข้อมูลโปรไฟล์ */}
+        {/* ข้อมูลโปรไฟล์ + รูปนักเรียน */}
         <Card title="ข้อมูลนักเรียน">
+          <div className="mb-4 flex flex-col items-center border-b border-line pb-4">
+            <StudentPhotoManager
+              studentId={student.id}
+              studentName={fullName}
+              initialPhotoFileName={student.photoFileName}
+              canManage={canManagePhoto}
+            />
+          </div>
           <dl className="space-y-2.5 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">รหัสนักเรียน</dt>
@@ -184,6 +205,22 @@ export default async function StudentDetailPage({
           </dl>
         </Card>
       </div>
+
+      {/* ตราสัญลักษณ์นักออม */}
+      {activeAccount && (
+        <Card title="ตราสัญลักษณ์นักออม" description="ความสำเร็จจากการออมสม่ำเสมอของนักเรียน">
+          <MilestoneBadges
+            balance={Number(activeAccount.balance)}
+            transactions={milestoneTxns.map((t) => ({
+              type: t.type,
+              status: t.status,
+              txnDate: t.txnDate,
+              amount: Number(t.amount),
+            }))}
+            showLocked
+          />
+        </Card>
+      )}
 
       {/* ธุรกรรมล่าสุด */}
       <section className="space-y-2">

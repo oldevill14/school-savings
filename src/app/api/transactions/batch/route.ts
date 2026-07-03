@@ -43,9 +43,9 @@ export async function POST(req: Request) {
     }
 
     const items: TxnItem[] = rawItems.map((raw, i) => parseTxnItem(raw, i));
-    const { count } = await recordTransactions(session, items);
+    const { count, results } = await recordTransactions(session, items);
 
-    return NextResponse.json({ ok: true, count });
+    return NextResponse.json({ ok: true, count, results });
   } catch (e) {
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -62,7 +62,9 @@ function buildQuery(params: Record<string, string | undefined>): string {
 }
 
 export default async function TransactionsPage({ searchParams }: PageProps) {
-  const session = await requireRole(["ADMIN", "TEACHER"]);
+  // EXECUTIVE (ผู้บริหาร) ดูประวัติธุรกรรมทั้งโรงเรียนแบบอ่านอย่างเดียว —
+  // ปุ่มยกเลิก (VOID) แสดงเฉพาะ ADMIN เท่านั้น จึงไม่มีทางกดแก้ไขได้
+  const session = await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
   const sp = await searchParams;
 
   // ---------- ห้องเรียนที่มีสิทธิ์เห็น ----------

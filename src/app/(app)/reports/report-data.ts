@@ -8,6 +8,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { formatThaiDate } from "@/lib/thai-date";
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -280,6 +281,8 @@ export interface YearlyReport {
     closing: string;
     /** เปลี่ยนแปลงสุทธิทั้งปี = deposit - withdraw */
     net: string;
+    /** รวมดอกเบี้ยที่ระบบจ่ายทั้งปี (DEPOSIT ที่ category=INTEREST, NORMAL) — เป็นส่วนหนึ่งของ deposit */
+    interest: string;
   };
   monthly: YearlyMonthRow[];
 }
@@ -292,7 +295,7 @@ export async function buildYearlyReport(yearBE: number): Promise<YearlyReport | 
   const yearRec = await prisma.academicYear.findUnique({ where: { year: yearBE } });
   if (!yearRec) return null;
 
-  const [classrooms, accounts, sumRows, txns] = await Promise.all([
+  const [classrooms, accounts, sumRows, txns, interestAgg] = await Promise.all([
     prisma.classroom.findMany({
       where: { academicYearId: yearRec.id },
       orderBy: { name: "asc" },
@@ -315,6 +318,16 @@ export async function buildYearlyReport(yearBE: number): Promise<YearlyReport | 
     prisma.transaction.findMany({
       where: { status: "NORMAL", account: { academicYearId: yearRec.id } },
       select: { type: true, amount: true, txnDate: true },
+    }),
+    // รวมดอกเบี้ยที่ระบบจ่ายทั้งปี (แสดงแยกบรรทัดในรายงานปี) — เป็นส่วนย่อยของยอดฝากรวม
+    prisma.transaction.aggregate({
+      where: {
+        status: "NORMAL",
+        type: "DEPOSIT",
+        category: "INTEREST",
+        account: { academicYearId: yearRec.id },
+      },
+      _sum: { amount: true },
     }),
   ]);
 
@@ -429,7 +442,262 @@ export async function buildYearlyReport(yearBE: number): Promise<YearlyReport | 
       withdraw: totalWithdraw.toFixed(2),
       closing: totalOpening.plus(totalDeposit).minus(totalWithdraw).toFixed(2),
       net: totalDeposit.minus(totalWithdraw).toFixed(2),
+      interest: (interestAgg._sum.amount ?? ZERO).toFixed(2),
     },
     monthly,
+  };
+}
+
+// ---------- ทะเบียนคุมเงิน (ledger รายบัญชี แนวราชการ) ----------
+
+/** ข้อความ "รายการ" ต่อธุรกรรม — ดอกเบี้ย / ฝากเงิน / ถอนเงิน (+ หมายเหตุถ้ามี) */
+function describeLedgerTxn(t: {
+  type: string;
+  category: string;
+  note: string | null;
+}): string {
+  const base =
+    t.category === "INTEREST"
+      ? "ดอกเบี้ย"
+      : t.type === "DEPOSIT"
+        ? "ฝากเงิน"
+        : "ถอนเงิน";
+  const note = t.note?.trim();
+  return note ? `${base} — ${note}` : base;
+}
+
+export interface LedgerEntry {
+  txnId: string;
+  /** ISO string — Date ข้าม boundary ไป client ไม่ได้ */
+  txnDate: string;
+  /** วันที่แบบไทย พ.ศ. "2 ก.ค. 2569" */
+  dateLabel: string;
+  /** คอลัมน์ "รายการ" */
+  description: string;
+  isDeposit: boolean;
+  /** รับ (ฝาก) — "0.00" ถ้าเป็นการถอน */
+  deposit: string;
+  /** จ่าย (ถอน) — "0.00" ถ้าเป็นการฝาก */
+  withdraw: string;
+  /** คงเหลือสะสมหลังรายการนี้ */
+  balance: string;
+  /** ผู้บันทึก */
+  recordedBy: string;
+}
+
+export interface LedgerAccount {
+  studentId: string;
+  studentCode: string;
+  fullName: string;
+  classroomName: string;
+  /** ยอดยกมา ณ ต้นช่วง */
+  carry: string;
+  /** ยอดยกไป ณ สิ้นช่วง */
+  closing: string;
+  totalDeposit: string;
+  totalWithdraw: string;
+  entries: LedgerEntry[];
+}
+
+export interface LedgerReport {
+  /** "ALL" หรือ classroomId */
+  scope: string;
+  /** "ทั้งโรงเรียน" หรือชื่อห้อง */
+  scopeLabel: string;
+  academicYear: number; // พ.ศ.
+  fromKey: string;
+  toKey: string;
+  fromLabel: string;
+  toLabel: string;
+  accounts: LedgerAccount[];
+  totals: { carry: string; deposit: string; withdraw: string; closing: string };
+}
+
+/**
+ * สร้างทะเบียนคุมเงินออมทรัพย์รายบัญชี (แนวราชการ) จากธุรกรรมจริง (status NORMAL)
+ * - scope = "ALL" -> ทุกบัญชีของปีการศึกษาที่เปิดใช้งาน
+ * - scope = classroomId -> เฉพาะบัญชีนักเรียนของห้องนั้น (ใช้ปีการศึกษาของห้อง)
+ * - from/to นอกหน้าต่างปีการศึกษา -> ใช้ค่าเริ่มต้น (พ.ค. -> เดือนปัจจุบัน)
+ * - คืน null ถ้าไม่พบ scope (ห้องไม่มีจริง / ยังไม่มีปีที่เปิดใช้งาน)
+ *
+ * หมายเหตุ: ผู้เรียกต้องเช็คสิทธิ์เอง (TEACHER = เฉพาะห้องตน, ห้าม "ALL")
+ */
+export async function buildLedgerReport(
+  scope: string,
+  opts: { fromKey?: string | null; toKey?: string | null } = {}
+): Promise<LedgerReport | null> {
+  let yearBE: number;
+  let academicYearId: string;
+  let scopeLabel: string;
+  let classroomId: string | null = null;
+
+  if (scope === "ALL") {
+    const active = await prisma.academicYear.findFirst({
+      where: { isActive: true },
+      orderBy: { year: "desc" },
+    });
+    if (!active) return null;
+    yearBE = active.year;
+    academicYearId = active.id;
+    scopeLabel = "ทั้งโรงเรียน";
+  } else {
+    const classroom = await prisma.classroom.findUnique({
+      where: { id: scope },
+      include: { academicYear: { select: { id: true, year: true } } },
+    });
+    if (!classroom) return null;
+    yearBE = classroom.academicYear.year;
+    academicYearId = classroom.academicYear.id;
+    scopeLabel = classroom.name;
+    classroomId = classroom.id;
+  }
+
+  const windowKeys = monthKeysForYear(yearBE);
+  const defaults = defaultRangeForYear(yearBE);
+  let fromKey =
+    opts.fromKey && windowKeys.includes(opts.fromKey) ? opts.fromKey : defaults.fromKey;
+  let toKey = opts.toKey && windowKeys.includes(opts.toKey) ? opts.toKey : defaults.toKey;
+  if (fromKey > toKey) [fromKey, toKey] = [toKey, fromKey];
+
+  const fromDate = parseMonthKey(fromKey)!.start;
+  const toExclusive = parseMonthKey(toKey)!.next;
+
+  const accounts = await prisma.account.findMany({
+    where: {
+      academicYearId,
+      ...(classroomId ? { student: { classroomId } } : {}),
+    },
+    select: {
+      id: true,
+      openingBalance: true,
+      student: {
+        select: {
+          id: true,
+          studentCode: true,
+          firstName: true,
+          lastName: true,
+          classroom: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  // เรียงตามห้อง แล้วรหัสนักเรียน (numeric) เพื่อให้ทะเบียนอ่านง่ายแบบราชการ
+  accounts.sort((a, b) => {
+    const byRoom = (a.student.classroom?.name ?? "").localeCompare(
+      b.student.classroom?.name ?? "",
+      "th"
+    );
+    if (byRoom !== 0) return byRoom;
+    return a.student.studentCode.localeCompare(b.student.studentCode, "th", {
+      numeric: true,
+    });
+  });
+
+  const accountIds = accounts.map((a) => a.id);
+
+  const txns = accountIds.length
+    ? await prisma.transaction.findMany({
+        where: {
+          accountId: { in: accountIds },
+          status: "NORMAL",
+          txnDate: { lt: toExclusive },
+        },
+        select: {
+          id: true,
+          accountId: true,
+          type: true,
+          category: true,
+          amount: true,
+          txnDate: true,
+          note: true,
+          recordedBy: { select: { name: true } },
+        },
+        orderBy: [{ txnDate: "asc" }, { createdAt: "asc" }],
+      })
+    : [];
+
+  type TxnRow = (typeof txns)[number];
+  const byAccount = new Map<string, TxnRow[]>();
+  for (const t of txns) {
+    const arr = byAccount.get(t.accountId);
+    if (arr) arr.push(t);
+    else byAccount.set(t.accountId, [t]);
+  }
+
+  let gCarry = ZERO;
+  let gDeposit = ZERO;
+  let gWithdraw = ZERO;
+
+  const ledgerAccounts: LedgerAccount[] = accounts.map((a) => {
+    const list = byAccount.get(a.id) ?? [];
+
+    // ยอดยกมา = ยอดต้นปี + ฝาก - ถอน ก่อนเดือนเริ่ม
+    let carry = a.openingBalance;
+    for (const t of list) {
+      if (t.txnDate < fromDate) {
+        carry = t.type === "DEPOSIT" ? carry.plus(t.amount) : carry.minus(t.amount);
+      }
+    }
+
+    let running = carry;
+    let dep = ZERO;
+    let wd = ZERO;
+    const entries: LedgerEntry[] = [];
+    for (const t of list) {
+      if (t.txnDate < fromDate) continue;
+      const isDeposit = t.type === "DEPOSIT";
+      if (isDeposit) {
+        running = running.plus(t.amount);
+        dep = dep.plus(t.amount);
+      } else {
+        running = running.minus(t.amount);
+        wd = wd.plus(t.amount);
+      }
+      entries.push({
+        txnId: t.id,
+        txnDate: t.txnDate.toISOString(),
+        dateLabel: formatThaiDate(t.txnDate),
+        description: describeLedgerTxn(t),
+        isDeposit,
+        deposit: isDeposit ? t.amount.toFixed(2) : "0.00",
+        withdraw: isDeposit ? "0.00" : t.amount.toFixed(2),
+        balance: running.toFixed(2),
+        recordedBy: t.recordedBy.name,
+      });
+    }
+
+    gCarry = gCarry.plus(carry);
+    gDeposit = gDeposit.plus(dep);
+    gWithdraw = gWithdraw.plus(wd);
+
+    return {
+      studentId: a.student.id,
+      studentCode: a.student.studentCode,
+      fullName: `${a.student.firstName} ${a.student.lastName}`,
+      classroomName: a.student.classroom?.name ?? "-",
+      carry: carry.toFixed(2),
+      closing: running.toFixed(2),
+      totalDeposit: dep.toFixed(2),
+      totalWithdraw: wd.toFixed(2),
+      entries,
+    };
+  });
+
+  return {
+    scope,
+    scopeLabel,
+    academicYear: yearBE,
+    fromKey,
+    toKey,
+    fromLabel: monthLabel(fromKey),
+    toLabel: monthLabel(toKey),
+    accounts: ledgerAccounts,
+    totals: {
+      carry: gCarry.toFixed(2),
+      deposit: gDeposit.toFixed(2),
+      withdraw: gWithdraw.toFixed(2),
+      closing: gCarry.plus(gDeposit).minus(gWithdraw).toFixed(2),
+    },
   };
 }

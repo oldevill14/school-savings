@@ -16,6 +16,8 @@
 import { Prisma, type Student } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { formatBaht } from "@/lib/money";
+import { logAudit, AuditAction } from "@/lib/audit";
+import { notifyGuardiansOfTransaction } from "@/lib/notify";
 import type { SessionPayload } from "@/lib/auth";
 
 /** จำนวนเงินสูงสุดต่อรายการ (กันกรอกผิด + กัน overflow ของ Decimal(12,2)) */
@@ -41,6 +43,16 @@ export type TxnItem = {
   amount: number;
   type: "DEPOSIT" | "WITHDRAW";
   note?: string | null;
+};
+
+/** ผลลัพธ์ต่อรายการหลังบันทึกสำเร็จ — ใช้พิมพ์สลิป (ยอดคงเหลือใหม่จริงจาก DB) */
+export type TxnResult = {
+  studentId: string;
+  type: "DEPOSIT" | "WITHDRAW";
+  /** จำนวนเงินของรายการ (บาท) */
+  amount: number;
+  /** ยอดคงเหลือหลังทำรายการ (บาท) — อ่านจากบัญชีภายใน transaction เดียวกัน */
+  balanceAfter: number;
 };
 
 function fullName(s: Pick<Student, "firstName" | "lastName">): string {
@@ -110,7 +122,7 @@ export function parseTxnItem(raw: unknown, index?: number): TxnItem {
 export async function recordTransactions(
   session: SessionPayload,
   items: TxnItem[]
-): Promise<{ count: number }> {
+): Promise<{ count: number; results: TxnResult[] }> {
   if (items.length === 0) {
     throw new TxnError("ไม่มีรายการธุรกรรมให้บันทึก");
   }
@@ -172,6 +184,8 @@ export async function recordTransactions(
   }
 
   const now = new Date();
+  // ยอดคงเหลือใหม่ต่อรายการ — เก็บไว้ "ภายใน" transaction เดียวกันเพื่อพิมพ์สลิป
+  const results: TxnResult[] = [];
 
   // ทุกรายการอยู่ใน transaction เดียว — ล้มแถวเดียว rollback ทั้งชุด
   // timeout 20s เผื่อ batch ใหญ่ (นักเรียนทั้งห้อง ~40 คน = ~120 query)
@@ -214,6 +228,7 @@ export async function recordTransactions(
       });
 
       const amount = new Prisma.Decimal(item.amount.toFixed(2));
+      let balanceAfter: Prisma.Decimal;
 
       if (item.type === "WITHDRAW") {
         // อัปเดตแบบมีเงื่อนไข balance >= amount — atomic กันยอดติดลบแม้มี request ซ้อน
@@ -231,11 +246,19 @@ export async function recordTransactions(
               `ไม่พอสำหรับถอน ${formatBaht(amount)} บาท (ระบบยกเลิกทั้งชุด ยังไม่มีรายการใดถูกบันทึก)`
           );
         }
+        // อ่านยอดใหม่ "ภายใน" transaction เดียวกัน เพื่อความถูกต้องของสลิป
+        const after = await tx.account.findUnique({
+          where: { id: account.id },
+          select: { balance: true },
+        });
+        balanceAfter = after!.balance;
       } else {
-        await tx.account.update({
+        const after = await tx.account.update({
           where: { id: account.id },
           data: { balance: { increment: amount } },
+          select: { balance: true },
         });
+        balanceAfter = after.balance;
       }
 
       await tx.transaction.create({
@@ -249,10 +272,30 @@ export async function recordTransactions(
           status: "NORMAL",
         },
       });
+
+      results.push({
+        studentId: item.studentId,
+        type: item.type,
+        amount: item.amount,
+        balanceAfter: Number(balanceAfter),
+      });
     }
   }, { maxWait: 5000, timeout: 20000 });
 
-  return { count: items.length };
+  // แจ้งเตือนผู้ปกครองผ่าน LINE (fire-and-forget) — หลัง commit สำเร็จเท่านั้น
+  // no-op ถ้าไม่ตั้ง LINE_CHANNEL_ACCESS_TOKEN; ห้ามให้ล้มเหลวไปกระทบธุรกรรมหลัก
+  for (const r of results) {
+    const student = studentById.get(r.studentId)!;
+    void notifyGuardiansOfTransaction([r.studentId], {
+      type: r.type,
+      amount: formatBaht(r.amount),
+      balanceAfter: formatBaht(r.balanceAfter),
+      txnDate: now,
+      studentName: fullName(student),
+    });
+  }
+
+  return { count: items.length, results };
 }
 
 /**
@@ -321,5 +364,14 @@ export async function voidTransaction(
         data: { balance: { increment: txn.amount } },
       });
     }
+  });
+
+  // บันทึก audit หลังยกเลิกสำเร็จ (fire-and-forget — ไม่มีทาง throw)
+  await logAudit({
+    userId: session.userId,
+    action: AuditAction.TXN_VOID,
+    detail:
+      `ยกเลิก${txn.type === "DEPOSIT" ? "ฝาก" : "ถอน"} ${formatBaht(txn.amount)} บาท ` +
+      `ของ ${fullName(txn.account.student)} (txn ${transactionId})`,
   });
 }

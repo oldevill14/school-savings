@@ -17,6 +17,7 @@
 import { NextResponse } from "next/server";
 import { requireRoleApi, AuthError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { logAudit, AuditAction } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ function errorResponse(e: unknown) {
 
 export async function POST(req: Request) {
   try {
-    await requireRoleApi(["ADMIN"]);
+    const session = await requireRoleApi(["ADMIN"]);
 
     const body = await req.json().catch(() => null);
     const confirmYear = Number(body?.confirmYear);
@@ -191,6 +192,16 @@ export async function POST(req: Request) {
       },
       { maxWait: 10_000, timeout: 60_000 }
     );
+
+    // บันทึก audit หลังปิดปีสำเร็จ (fire-and-forget — ไม่มีทาง throw)
+    await logAudit({
+      userId: session.userId,
+      action: AuditAction.YEAR_CLOSE,
+      detail:
+        `ปิดปีการศึกษา ${summary.closedYear} เปิดปี ${summary.newYear} · ` +
+        `เลื่อนชั้น ${summary.promoted} คน จบการศึกษา ${summary.graduated} คน ` +
+        `สร้างบัญชียกยอด ${summary.accountsCreated} บัญชี`,
+    });
 
     return NextResponse.json({ ok: true, summary });
   } catch (e) {

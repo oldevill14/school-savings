@@ -43,9 +43,9 @@ export async function POST(req: Request) {
     }
 
     const item = parseTxnItem(body);
-    const { count } = await recordTransactions(session, [item]);
+    const { count, results } = await recordTransactions(session, [item]);
 
-    return NextResponse.json({ ok: true, count });
+    return NextResponse.json({ ok: true, count, results });
   } catch (e) {
     return errorResponse(e);
   }

@@ -32,7 +32,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const session = await requireRole(["ADMIN", "TEACHER"]);
+  // EXECUTIVE (ผู้บริหาร) ดูแดชบอร์ดแบบอ่านอย่างเดียว — เห็นภาพรวมทั้งโรงเรียนเหมือน ADMIN
+  const session = await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
 
   const activeYear = await prisma.academicYear.findFirst({
     where: { isActive: true },
@@ -162,7 +163,7 @@ export default async function DashboardPage() {
   }
 
   const scopeLabel =
-    session.role === "ADMIN"
+    session.role === "ADMIN" || session.role === "EXECUTIVE"
       ? "ภาพรวมทั้งโรงเรียน"
       : homerooms.length > 0
         ? `ห้อง ${homerooms.map((c) => c.name).join(" · ")}`

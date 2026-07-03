@@ -13,7 +13,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 
 /** ตรงกับ Prisma enum Role — ประกาศแยกไว้เพื่อไม่ผูก lib/UI กับ generated client */
-export type Role = "ADMIN" | "TEACHER" | "PARENT";
+export type Role = "ADMIN" | "TEACHER" | "PARENT" | "EXECUTIVE";
 
 export const SESSION_COOKIE = "session";
 const SESSION_MAX_AGE = 60 * 60 * 12; // 12 ชั่วโมง
@@ -38,7 +38,9 @@ export type SessionPayload = {
   userId: string;
   role: Role;
   name: string;
-  linkedStudentId: string | null; // มีค่าเฉพาะ PARENT
+  // นักเรียนที่ผู้ใช้ (PARENT) ผูกไว้ผ่านตาราง Guardian — เป็น cuid String[] (ไม่ใช่ number[])
+  // เพราะ Student.id เป็น cuid; role อื่นเป็น [] เสมอ
+  studentIds: string[];
 };
 
 function getSecretKey(): Uint8Array {
@@ -107,7 +109,7 @@ export async function createSession(payload: SessionPayload): Promise<void> {
  * - รหัสผ่านถูกรีเซ็ตหลังออก token (claim "pwv" ไม่ตรง fingerprint ปัจจุบัน)
  * ทำให้การปิดใช้งาน/รีเซ็ตรหัสผ่าน revoke session เดิมทันที ไม่ต้องรอ token หมดอายุ
  *
- * role / name / linkedStudentId ใช้ค่าจาก DB (ค่าใน token อาจค้างเก่า)
+ * role / name / studentIds ใช้ค่าจาก DB (ค่าใน token อาจค้างเก่า)
  * หมายเหตุ: ตรวจใน getSession (ไม่ใช่แค่ requireRole/requireRoleApi) เพื่อให้
  * หน้า /login และ (app)/layout ที่เรียก getSession ตรงๆ เห็นผลเดียวกัน —
  * ถ้าตรวจเฉพาะใน requireRole ผู้ใช้ที่ถูกปิดจะเด้งวน /dashboard <-> /login ไม่รู้จบ
@@ -130,7 +132,13 @@ export async function getSession(): Promise<SessionPayload | null> {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, name: true, linkedStudentId: true, passwordHash: true },
+    select: {
+      role: true,
+      name: true,
+      passwordHash: true,
+      // ผูกนักเรียนผ่าน Guardian (แทน linkedStudentId เดิม) — มีเฉพาะ PARENT
+      guardians: { select: { studentId: true } },
+    },
   });
   if (!user) return null;
   if (user.passwordHash.startsWith(DISABLED_PREFIX)) return null;
@@ -140,7 +148,7 @@ export async function getSession(): Promise<SessionPayload | null> {
     userId,
     role: user.role as Role,
     name: user.name,
-    linkedStudentId: user.linkedStudentId ?? null,
+    studentIds: user.role === "PARENT" ? user.guardians.map((g) => g.studentId) : [],
   };
 }
 

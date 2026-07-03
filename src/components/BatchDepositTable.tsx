@@ -19,6 +19,10 @@ import Select from "@/components/ui/Select";
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
 import { Table, THead, TBody, TR, TH, TD, TableEmpty } from "@/components/ui/Table";
+import SlipPrintButton, {
+  type SlipHeader,
+  type SlipItem,
+} from "@/components/TransactionSlip";
 import { formatBaht, parseBaht } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +42,28 @@ export interface BatchDepositTableProps {
   /** true เมื่อมีห้องเดียว (teacher) — ล็อก select */
   lockClassroom?: boolean;
   students: BatchStudentRow[];
+  /** ชื่อโรงเรียน (จาก getSchoolSetting) — ใช้บนหัวสลิป */
+  schoolName: string;
+  /** เขตพื้นที่ (จาก getSchoolSetting) */
+  schoolArea?: string;
+  /** ชื่อผู้บันทึก (session.name) — แสดงบนสลิป */
+  recorderName: string;
 }
+
+/** รายการที่เพิ่งบันทึกสำเร็จ (สำหรับ Modal สรุป + พิมพ์สลิป) */
+type SavedResult = {
+  items: SlipItem[];
+  savedAt: string;
+  classroomName?: string;
+};
+
+/** โครงข้อมูลผลลัพธ์ต่อรายการจาก API (ยอดคงเหลือใหม่จริงจาก DB) */
+type ApiTxnResult = {
+  studentId: string;
+  type: TxnType;
+  amount: number;
+  balanceAfter: number;
+};
 
 type TxnType = "DEPOSIT" | "WITHDRAW";
 type RowState = { amount: string; type: TxnType };
@@ -55,6 +80,9 @@ export default function BatchDepositTable({
   selectedClassroomId,
   lockClassroom = false,
   students,
+  schoolName,
+  schoolArea,
+  recorderName,
 }: BatchDepositTableProps) {
   const router = useRouter();
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -64,6 +92,8 @@ export default function BatchDepositTable({
   const [banner, setBanner] = useState<{ kind: "success" | "error"; text: string } | null>(
     null
   );
+  const [saved, setSaved] = useState<SavedResult | null>(null);
+  const [resultOpen, setResultOpen] = useState(false);
   const amountRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const getRow = (studentId: string): RowState => rows[studentId] ?? EMPTY_ROW;
@@ -176,18 +206,42 @@ export default function BatchDepositTable({
           })),
         }),
       });
-      const data: { ok?: boolean; count?: number; error?: string } = await res
-        .json()
-        .catch(() => ({}));
+      const data: {
+        ok?: boolean;
+        count?: number;
+        error?: string;
+        results?: ApiTxnResult[];
+      } = await res.json().catch(() => ({}));
 
       if (res.ok && data.ok) {
+        // ประกอบข้อมูลสลิปจากผลลัพธ์ที่ server คืน (ยอดคงเหลือใหม่จริง) + ชื่อ/รหัสในตาราง
+        const studentById = new Map(students.map((s) => [s.studentId, s]));
+        const slipItems: SlipItem[] = (data.results ?? []).map((r) => {
+          const s = studentById.get(r.studentId);
+          return {
+            studentCode: s?.studentCode ?? "",
+            studentName: s?.name ?? "",
+            type: r.type,
+            amount: r.amount,
+            balanceAfter: r.balanceAfter,
+          };
+        });
+
+        setConfirmOpen(false);
         setRows({});
         setFillValue("");
-        setConfirmOpen(false);
         setBanner({
           kind: "success",
-          text: `บันทึกเรียบร้อย ${data.count ?? summary.entries.length} รายการ — ยอดคงเหลือในตารางอัปเดตแล้ว`,
+          text: `บันทึกเรียบร้อย ${data.count ?? slipItems.length} รายการ — ยอดคงเหลือในตารางอัปเดตแล้ว`,
         });
+        if (slipItems.length > 0) {
+          setSaved({
+            items: slipItems,
+            savedAt: new Date().toISOString(),
+            classroomName: classrooms.find((c) => c.id === selectedClassroomId)?.name,
+          });
+          setResultOpen(true);
+        }
         router.refresh();
       } else {
         setConfirmOpen(false);
@@ -407,6 +461,91 @@ export default function BatchDepositTable({
           <p className="text-slate-500">
             ระบบบันทึกทั้งชุดในครั้งเดียว — หากมีรายการใดไม่ผ่าน (เช่น ถอนเกินยอด)
             จะยกเลิกทั้งชุดและแจ้งสาเหตุ
+          </p>
+        </div>
+      </Modal>
+
+      {/* Modal สรุปรายการที่เพิ่งบันทึก + ปุ่มพิมพ์สลิป */}
+      <Modal
+        open={resultOpen}
+        onClose={() => setResultOpen(false)}
+        title="บันทึกธุรกรรมสำเร็จ"
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setResultOpen(false)}>
+              ปิด
+            </Button>
+            {saved && (
+              <SlipPrintButton
+                header={
+                  {
+                    schoolName,
+                    schoolArea,
+                    recorderName,
+                    classroomName: saved.classroomName,
+                    txnDate: saved.savedAt,
+                  } satisfies SlipHeader
+                }
+                items={saved.items}
+              />
+            )}
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="flex items-center gap-2 text-deposit">
+            <CheckCircle2 className="h-5 w-5 shrink-0" />
+            <span>
+              บันทึกเรียบร้อย{" "}
+              <strong>{saved?.items.length ?? 0} รายการ</strong>
+              {saved?.classroomName ? ` · ห้อง ${saved.classroomName}` : ""}
+            </span>
+          </p>
+          <Table minWidth="520px">
+            <THead>
+              <TR>
+                <TH>นักเรียน</TH>
+                <TH>ประเภท</TH>
+                <TH align="right">จำนวนเงิน</TH>
+                <TH align="right">คงเหลือใหม่</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {(saved?.items ?? []).map((item) => {
+                const isDeposit = item.type === "DEPOSIT";
+                return (
+                  <TR key={item.studentCode + item.studentName}>
+                    <TD>
+                      <div className="font-medium text-slate-900">{item.studentName}</div>
+                      <div className="text-xs text-slate-500">รหัส {item.studentCode}</div>
+                    </TD>
+                    <TD>
+                      <Badge variant={isDeposit ? "green" : "red"}>
+                        {isDeposit ? "ฝาก" : "ถอน"}
+                      </Badge>
+                    </TD>
+                    <TD
+                      align="right"
+                      className={cn(
+                        "font-medium",
+                        isDeposit ? "text-deposit" : "text-withdraw"
+                      )}
+                    >
+                      {isDeposit ? "+" : "-"}
+                      {formatBaht(item.amount)}
+                    </TD>
+                    <TD align="right" className="font-semibold">
+                      {formatBaht(item.balanceAfter)}
+                    </TD>
+                  </TR>
+                );
+              })}
+              {(saved?.items.length ?? 0) === 0 && <TableEmpty colSpan={4} />}
+            </TBody>
+          </Table>
+          <p className="text-slate-500">
+            กด &ldquo;พิมพ์สลิป&rdquo; เพื่อพิมพ์ใบสลิปรายคน (หนึ่งใบต่อนักเรียน)
           </p>
         </div>
       </Modal>

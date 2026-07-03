@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getSchoolSetting } from "@/lib/settings";
 import { formatBaht } from "@/lib/money";
 import { formatThaiDateTime } from "@/lib/thai-date";
 import Badge from "@/components/ui/Badge";
@@ -10,6 +11,7 @@ import Card from "@/components/ui/Card";
 import Select from "@/components/ui/Select";
 import { Table, THead, TBody, TR, TH, TD, TableEmpty } from "@/components/ui/Table";
 import PrintButton from "../PrintButton";
+import ExcelLinkButton from "../ExcelLinkButton";
 import {
   buildClassroomReport,
   defaultRangeForYear,
@@ -53,8 +55,9 @@ export default async function ClassroomReportPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const session = await requireRole(["ADMIN", "TEACHER"]);
+  const session = await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
   const sp = await searchParams;
+  const school = await getSchoolSetting();
 
   const activeYear = await prisma.academicYear.findFirst({
     where: { isActive: true },
@@ -102,6 +105,12 @@ export default async function ClassroomReportPage({
   const fromValue = report?.fromKey ?? defaults?.fromKey ?? "";
   const toValue = report?.toKey ?? defaults?.toKey ?? "";
 
+  const exportHref = report
+    ? `/api/export/classroom-report?classroomId=${encodeURIComponent(
+        report.classroom.id
+      )}&from=${report.fromKey}&to=${report.toKey}`
+    : null;
+
   const generatedAt = new Date();
 
   return (
@@ -124,7 +133,12 @@ export default async function ClassroomReportPage({
             คำนวณจากธุรกรรมสถานะปกติทั้งหมด
           </p>
         </div>
-        {report && <PrintButton />}
+        {report && exportHref && (
+          <div className="flex flex-wrap gap-2">
+            <ExcelLinkButton href={exportHref} />
+            <PrintButton />
+          </div>
+        )}
       </div>
 
       {!activeYear && (
@@ -160,7 +174,7 @@ export default async function ClassroomReportPage({
             <Select
               name="classroomId"
               label="ห้องเรียน"
-              placeholder={session.role === "ADMIN" ? "— เลือกห้องเรียน —" : undefined}
+              placeholder={session.role !== "TEACHER" ? "— เลือกห้องเรียน —" : undefined}
               options={classrooms.map((c) => ({ value: c.id, label: c.name }))}
               defaultValue={selectedId ?? ""}
               required
@@ -201,10 +215,8 @@ export default async function ClassroomReportPage({
         <div className="space-y-4">
           {/* หัวกระดาษเมื่อสั่งพิมพ์ */}
           <div className="print-only text-center text-slate-900">
-            <div className="text-lg font-bold">โรงเรียนบ้านกะดาด</div>
-            <div className="text-sm">
-              สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสุรินทร์ เขต 3
-            </div>
+            <div className="text-lg font-bold">{school.schoolName}</div>
+            <div className="text-sm">{school.schoolArea}</div>
             <div className="mt-2 text-base font-semibold">
               รายงานสรุปออมทรัพย์รายห้องเรียน — ห้อง {report.classroom.name}{" "}
               ปีการศึกษา {report.academicYear}

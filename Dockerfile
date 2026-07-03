@@ -54,6 +54,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV TZ=Asia/Bangkok
 RUN apk add --no-cache tzdata
 
+# โฟลเดอร์เก็บไฟล์อัปโหลด (โลโก้โรงเรียน, รูปนักเรียน) — compose mount volume ทับที่ /app/uploads
+# ตั้ง default env ไว้เผื่อรันโดยไม่ผ่าน compose ด้วย
+ENV UPLOADS_DIR=/app/uploads
+
 # prisma CLI (migrate deploy ตอน start) + tsx (รัน prisma/seed.ts ใน container)
 # + bcryptjs (seed.ts ใช้ hash รหัสผ่าน — standalone trace ของ Next ไม่ได้วางไว้ให้
 #   require จาก /app/prisma/ จึงต้องลง global แล้วชี้ NODE_PATH ด้านล่าง)
@@ -77,6 +81,9 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
 # schema + migrations + seed สำหรับ prisma migrate deploy / seed
 COPY --from=build --chown=nextjs:nodejs /app/prisma ./prisma
+
+# สร้างโฟลเดอร์ uploads ให้ user nextjs เขียนได้ (named volume จะ inherit สิทธิ์นี้ตอน mount ครั้งแรก)
+RUN mkdir -p /app/uploads && chown -R nextjs:nodejs /app/uploads
 
 USER nextjs
 EXPOSE 3000

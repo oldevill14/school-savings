@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowRightLeft,
   BookOpen,
+  Download,
   Pencil,
   Search,
   Upload,
@@ -23,6 +24,7 @@ import Select from "@/components/ui/Select";
 import Modal from "@/components/ui/Modal";
 import Badge, { type BadgeVariant } from "@/components/ui/Badge";
 import { Table, THead, TBody, TR, TH, TD, TableEmpty } from "@/components/ui/Table";
+import StudentAvatar from "@/components/StudentAvatar";
 import { formatBaht } from "@/lib/money";
 
 // ---------- types ----------
@@ -37,6 +39,8 @@ export interface StudentRow {
   status: StudentStatusValue;
   classroomId: string;
   classroomName: string;
+  /** basename รูปนักเรียน (Student.photoFileName) — null ถ้ายังไม่มีรูป */
+  photoFileName: string | null;
   /** ยอดคงเหลือปี active (Decimal.toString()) — null ถ้ายังไม่มีบัญชี */
   balance: string | null;
 }
@@ -366,18 +370,28 @@ export default function StudentsClient({
           </div>
         </div>
 
-        {canManage && (
-          <div className="flex shrink-0 gap-2">
-            <Button variant="secondary" onClick={openImport}>
-              <Upload className="h-4 w-4" />
-              นำเข้า CSV
-            </Button>
-            <Button onClick={openAdd}>
-              <UserPlus className="h-4 w-4" />
-              เพิ่มนักเรียน
-            </Button>
-          </div>
-        )}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {/* ดาวน์โหลด Excel รายชื่อ — ชี้ api/export/students (B5) เปิดได้ทุกผู้ที่เห็นหน้านี้ */}
+          <a
+            href="/api/export/students"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 text-sm font-medium text-navy transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy/30 focus-visible:ring-offset-1"
+          >
+            <Download className="h-4 w-4" />
+            ดาวน์โหลด Excel รายชื่อ
+          </a>
+          {canManage && (
+            <>
+              <Button variant="secondary" onClick={openImport}>
+                <Upload className="h-4 w-4" />
+                นำเข้า CSV
+              </Button>
+              <Button onClick={openAdd}>
+                <UserPlus className="h-4 w-4" />
+                เพิ่มนักเรียน
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* ตารางรายชื่อ */}
@@ -397,8 +411,18 @@ export default function StudentsClient({
             <TR key={s.id}>
               <TD className="whitespace-nowrap font-medium tabular-nums">{s.studentCode}</TD>
               <TD>
-                <Link href={`/students/${s.id}`} className="link-navy font-medium">
-                  {s.firstName} {s.lastName}
+                <Link
+                  href={`/students/${s.id}`}
+                  className="inline-flex items-center gap-2.5 font-medium text-navy hover:underline"
+                >
+                  <StudentAvatar
+                    photoFileName={s.photoFileName}
+                    name={`${s.firstName} ${s.lastName}`}
+                    size="sm"
+                  />
+                  <span>
+                    {s.firstName} {s.lastName}
+                  </span>
                 </Link>
               </TD>
               <TD className="whitespace-nowrap">{s.classroomName}</TD>

@@ -14,8 +14,10 @@ import StudentsClient, { type StudentRow } from "./StudentsClient";
 export const dynamic = "force-dynamic";
 
 export default async function StudentsPage() {
-  const session = await requireRole(["ADMIN", "TEACHER"]);
-  const isAdmin = session.role === "ADMIN";
+  const session = await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
+  // จัดการได้ = ADMIN เท่านั้น · เห็นทุกห้อง = ADMIN + EXECUTIVE (read-only) · TEACHER เห็นเฉพาะห้องตน
+  const canManage = session.role === "ADMIN";
+  const seesAll = session.role === "ADMIN" || session.role === "EXECUTIVE";
 
   const activeYear = await prisma.academicYear.findFirst({
     where: { isActive: true },
@@ -35,11 +37,11 @@ export default async function StudentsPage() {
     );
   }
 
-  // ห้องเรียนของปี active — TEACHER เห็นเฉพาะห้องที่ตนประจำ
+  // ห้องเรียนของปี active — TEACHER เห็นเฉพาะห้องที่ตนประจำ (ADMIN/EXECUTIVE เห็นทุกห้อง)
   const classrooms = await prisma.classroom.findMany({
     where: {
       academicYearId: activeYear.id,
-      ...(isAdmin ? {} : { teacherId: session.userId }),
+      ...(seesAll ? {} : { teacherId: session.userId }),
     },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
@@ -69,6 +71,7 @@ export default async function StudentsPage() {
     status: s.status,
     classroomId: s.classroom.id,
     classroomName: s.classroom.name,
+    photoFileName: s.photoFileName,
     balance: s.accounts[0] ? s.accounts[0].balance.toString() : null,
   }));
 
@@ -78,11 +81,11 @@ export default async function StudentsPage() {
         <h1 className="text-xl">นักเรียน</h1>
         <p className="mt-0.5 text-sm text-slate-500">
           ปีการศึกษา {activeYear.year} · ทั้งหมด {rows.length} คน
-          {!isAdmin && " (เฉพาะห้องประจำชั้นของท่าน)"}
+          {!seesAll && " (เฉพาะห้องประจำชั้นของท่าน)"}
         </p>
       </div>
 
-      {!isAdmin && classrooms.length === 0 ? (
+      {!seesAll && classrooms.length === 0 ? (
         <Card>
           <p className="text-sm text-slate-600">
             ท่านยังไม่ได้รับมอบหมายเป็นครูประจำชั้นในปีการศึกษา {activeYear.year} —
@@ -90,7 +93,7 @@ export default async function StudentsPage() {
           </p>
         </Card>
       ) : (
-        <StudentsClient students={rows} classrooms={classrooms} canManage={isAdmin} />
+        <StudentsClient students={rows} classrooms={classrooms} canManage={canManage} />
       )}
     </div>
   );

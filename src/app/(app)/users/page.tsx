@@ -3,16 +3,26 @@
 /**
  * /users — จัดการผู้ใช้ (ADMIN เท่านั้น)
  *
- * - ตารางผู้ใช้ทั้งหมด + สถานะใช้งาน
- * - สร้างผู้ใช้ใหม่ (PARENT ต้องเลือกนักเรียนที่ผูก) — รหัสผ่านสุ่ม 8 ตัว แสดงครั้งเดียว
- * - รีเซ็ตรหัสผ่าน (สุ่มใหม่ แสดงครั้งเดียว)
+ * - ตารางผู้ใช้ทั้งหมด + สถานะใช้งาน + นักเรียนที่ผูก (รองรับผู้ปกครองหลายบุตร)
+ * - สร้างผู้ใช้ใหม่ (ทุกบทบาทรวม EXECUTIVE); PARENT เลือกนักเรียนได้หลายคน
+ *   — รหัสผ่านสุ่ม 8 ตัว แสดงครั้งเดียว (บัญชีใหม่ถูกตั้ง mustChangePassword)
+ * - จัดการการผูกนักเรียนของผู้ปกครอง (เพิ่ม/ถอด Guardian) ภายหลังได้
+ * - รีเซ็ตรหัสผ่าน (สุ่มใหม่ + ตั้ง mustChangePassword, แสดงครั้งเดียว)
  * - ปิด/เปิดใช้งาน (ไม่มีการลบผู้ใช้)
  *
  * สิทธิ์ถูกบังคับฝั่ง server: middleware (prefix /users = ADMIN)
  * + requireRoleApi(["ADMIN"]) ในทุก endpoint
  */
 import { useCallback, useEffect, useState } from "react";
-import { Ban, CircleCheck, KeyRound, TriangleAlert, UserPlus } from "lucide-react";
+import {
+  Ban,
+  CircleCheck,
+  KeyRound,
+  TriangleAlert,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
@@ -24,13 +34,19 @@ import { ROLE_LABELS } from "@/components/layout/Topbar";
 import { formatThaiDate } from "@/lib/thai-date";
 import type { Role } from "@/lib/auth";
 
+interface LinkedStudent {
+  id: string;
+  studentCode: string;
+  name: string;
+}
+
 interface UserRow {
   id: string;
   username: string;
   name: string;
   role: Role;
   active: boolean;
-  linkedStudent: { id: string; studentCode: string; name: string } | null;
+  linkedStudents: LinkedStudent[];
   createdAt: string;
 }
 
@@ -51,20 +67,21 @@ const ROLE_BADGE: Record<Role, "gold" | "navy" | "gray"> = {
   ADMIN: "gold",
   TEACHER: "navy",
   PARENT: "gray",
+  EXECUTIVE: "navy",
 };
 
 type CreateForm = {
   username: string;
   name: string;
   role: Role;
-  linkedStudentId: string;
+  linkedStudentIds: string[];
 };
 
 const EMPTY_CREATE: CreateForm = {
   username: "",
   name: "",
   role: "TEACHER",
-  linkedStudentId: "",
+  linkedStudentIds: [],
 };
 
 /** modal ยืนยันการกระทำกับผู้ใช้รายคน */
@@ -94,6 +111,11 @@ export default function UsersPage() {
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+
+  // จัดการนักเรียนที่ผูกกับผู้ปกครอง (Guardian)
+  const [manageUserId, setManageUserId] = useState<string | null>(null);
+  const [manageError, setManageError] = useState<string | null>(null);
+  const [manageBusy, setManageBusy] = useState(false);
 
   // รหัสผ่านที่เพิ่งสร้าง/รีเซ็ต — แสดงครั้งเดียวเท่านั้น
   const [passwordReveal, setPasswordReveal] = useState<{
@@ -128,7 +150,15 @@ export default function UsersPage() {
     setCreateOpen(true);
   }
 
+  function studentLabel(s: StudentOption): string {
+    return `${s.studentCode} ${s.name} (${s.classroomName})`;
+  }
+
   async function submitCreate() {
+    if (createForm.role === "PARENT" && createForm.linkedStudentIds.length === 0) {
+      setCreateError("ผู้ปกครองต้องเลือกนักเรียนที่ผูกบัญชีอย่างน้อย 1 คน");
+      return;
+    }
     setSaving(true);
     setCreateError(null);
     try {
@@ -139,8 +169,8 @@ export default function UsersPage() {
           username: createForm.username,
           name: createForm.name,
           role: createForm.role,
-          linkedStudentId:
-            createForm.role === "PARENT" ? createForm.linkedStudentId || null : null,
+          linkedStudentIds:
+            createForm.role === "PARENT" ? createForm.linkedStudentIds : [],
         }),
       });
       const json = await readJson(res);
@@ -194,6 +224,29 @@ export default function UsersPage() {
     }
   }
 
+  async function mutateGuardian(method: "POST" | "DELETE", studentId: string) {
+    if (!manageUserId) return;
+    setManageBusy(true);
+    setManageError(null);
+    try {
+      const res = await fetch("/api/guardians", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: manageUserId, studentId }),
+      });
+      const json = await readJson(res);
+      if (!res.ok) {
+        setManageError((json.error as string) || "ปรับการผูกนักเรียนไม่สำเร็จ");
+        return;
+      }
+      await refresh();
+    } catch {
+      setManageError("เชื่อมต่อระบบไม่ได้ กรุณาลองใหม่");
+    } finally {
+      setManageBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="py-20 text-center text-sm text-slate-500">กำลังโหลดข้อมูล...</div>
@@ -220,6 +273,23 @@ export default function UsersPage() {
         ? "ยืนยันปิดใช้งานบัญชี"
         : "ยืนยันเปิดใช้งานบัญชี";
 
+  // ผู้ใช้ที่กำลังจัดการนักเรียน (อ่านสดจาก data เพื่อให้สะท้อนผลหลัง refresh)
+  const manageUser = manageUserId
+    ? (data.users.find((u) => u.id === manageUserId) ?? null)
+    : null;
+
+  // นักเรียนที่ยังผูกเพิ่มได้ในโหมดจัดการ
+  const manageAvailable = manageUser
+    ? data.students.filter(
+        (s) => !manageUser.linkedStudents.some((l) => l.id === s.id)
+      )
+    : [];
+
+  // นักเรียนที่ยังเลือกเพิ่มได้ในฟอร์มสร้าง (PARENT)
+  const createAvailable = data.students.filter(
+    (s) => !createForm.linkedStudentIds.includes(s.id)
+  );
+
   return (
     <div className="space-y-6">
       {/* ส่วนหัว */}
@@ -237,7 +307,7 @@ export default function UsersPage() {
       </div>
 
       {/* ตารางผู้ใช้ */}
-      <Table minWidth="860px">
+      <Table minWidth="960px">
         <THead>
           <TR>
             <TH>ชื่อผู้ใช้</TH>
@@ -265,10 +335,19 @@ export default function UsersPage() {
                 <Badge variant={ROLE_BADGE[u.role]}>{ROLE_LABELS[u.role]}</Badge>
               </TD>
               <TD>
-                {u.linkedStudent ? (
-                  <span>
-                    {u.linkedStudent.studentCode} — {u.linkedStudent.name}
-                  </span>
+                {u.linkedStudents.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {u.linkedStudents.map((s) => (
+                      <span
+                        key={s.id}
+                        className="inline-flex items-center rounded-full border border-line bg-slate-50 px-2 py-0.5 text-xs text-slate-600"
+                      >
+                        {s.studentCode} {s.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : u.role === "PARENT" ? (
+                  <span className="text-slate-400">ยังไม่ผูก</span>
                 ) : (
                   <span className="text-slate-400">-</span>
                 )}
@@ -282,7 +361,20 @@ export default function UsersPage() {
               </TD>
               <TD>{formatThaiDate(u.createdAt)}</TD>
               <TD align="center">
-                <div className="flex items-center justify-center gap-1">
+                <div className="flex flex-wrap items-center justify-center gap-1">
+                  {u.role === "PARENT" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setManageError(null);
+                        setManageUserId(u.id);
+                      }}
+                    >
+                      <Users className="h-4 w-4" />
+                      นักเรียน
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -383,29 +475,133 @@ export default function UsersPage() {
               setCreateForm({
                 ...createForm,
                 role: e.target.value as Role,
-                linkedStudentId: "",
+                linkedStudentIds: [],
               })
             }
           />
           {createForm.role === "PARENT" && (
-            <Select
-              label="นักเรียนที่ผูกบัญชี"
-              placeholder="— เลือกนักเรียน —"
-              options={data.students.map((s) => ({
-                value: s.id,
-                label: `${s.studentCode} ${s.name} (${s.classroomName})`,
-              }))}
-              value={createForm.linkedStudentId}
-              onChange={(e) =>
-                setCreateForm({ ...createForm, linkedStudentId: e.target.value })
-              }
-            />
+            <div className="space-y-2">
+              <Select
+                label="นักเรียนที่ผูกบัญชี (เลือกได้หลายคน)"
+                placeholder="— เลือกนักเรียนเพื่อเพิ่ม —"
+                options={createAvailable.map((s) => ({
+                  value: s.id,
+                  label: studentLabel(s),
+                }))}
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  setCreateForm((f) => ({
+                    ...f,
+                    linkedStudentIds: [...f.linkedStudentIds, id],
+                  }));
+                }}
+              />
+              {createForm.linkedStudentIds.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {createForm.linkedStudentIds.map((id) => {
+                    const s = data.students.find((x) => x.id === id);
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded-full border border-navy/20 bg-navy/5 px-2.5 py-1 text-xs text-navy"
+                      >
+                        {s ? `${s.studentCode} ${s.name}` : id}
+                        <button
+                          type="button"
+                          aria-label="เอาออก"
+                          className="rounded-full p-0.5 hover:bg-navy/10"
+                          onClick={() =>
+                            setCreateForm((f) => ({
+                              ...f,
+                              linkedStudentIds: f.linkedStudentIds.filter(
+                                (x) => x !== id
+                              ),
+                            }))
+                          }
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">ยังไม่ได้เลือกนักเรียน</p>
+              )}
+            </div>
           )}
           <p className="text-sm text-slate-500">
             ระบบจะสุ่มรหัสผ่าน 8 ตัวให้อัตโนมัติ และแสดงเพียงครั้งเดียวหลังสร้างสำเร็จ
+            (ผู้ใช้ต้องตั้งรหัสผ่านใหม่เมื่อเข้าสู่ระบบครั้งแรก)
           </p>
           {createError && <p className="text-sm text-withdraw">{createError}</p>}
         </div>
+      </Modal>
+
+      {/* Modal จัดการนักเรียนที่ผูก (ผู้ปกครอง) */}
+      <Modal
+        open={manageUser !== null}
+        onClose={() => setManageUserId(null)}
+        title="นักเรียนที่ผูกกับผู้ปกครอง"
+        footer={<Button onClick={() => setManageUserId(null)}>ปิดหน้าต่าง</Button>}
+      >
+        {manageUser && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              ผู้ปกครอง{" "}
+              <span className="font-semibold text-slate-900">{manageUser.name}</span> (
+              {manageUser.username})
+            </p>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-slate-700">นักเรียนที่ผูกไว้</div>
+              {manageUser.linkedStudents.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {manageUser.linkedStudents.map((s) => (
+                    <span
+                      key={s.id}
+                      className="inline-flex items-center gap-1 rounded-full border border-navy/20 bg-navy/5 px-2.5 py-1 text-xs text-navy"
+                    >
+                      {s.studentCode} {s.name}
+                      <button
+                        type="button"
+                        aria-label="ถอดการผูก"
+                        disabled={manageBusy}
+                        className="rounded-full p-0.5 hover:bg-navy/10 disabled:opacity-50"
+                        onClick={() => void mutateGuardian("DELETE", s.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  ยังไม่ได้ผูกนักเรียน — ผู้ปกครองจะยังไม่เห็นข้อมูลบุตรจนกว่าจะผูกอย่างน้อย 1 คน
+                </p>
+              )}
+            </div>
+
+            <Select
+              label="เพิ่มนักเรียน"
+              placeholder="— เลือกนักเรียนเพื่อผูกเพิ่ม —"
+              disabled={manageBusy || manageAvailable.length === 0}
+              options={manageAvailable.map((s) => ({
+                value: s.id,
+                label: studentLabel(s),
+              }))}
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (id) void mutateGuardian("POST", id);
+              }}
+            />
+
+            {manageError && <p className="text-sm text-withdraw">{manageError}</p>}
+          </div>
+        )}
       </Modal>
 
       {/* Modal ยืนยันการกระทำ */}

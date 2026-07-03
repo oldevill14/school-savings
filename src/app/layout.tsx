@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Sarabun } from "next/font/google";
+import { getSchoolSetting, DEFAULT_SCHOOL_SETTING } from "@/lib/settings";
 import "./globals.css";
 
 const sarabun = Sarabun({
@@ -9,14 +10,25 @@ const sarabun = Sarabun({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: {
-    default: "ระบบออมทรัพย์โรงเรียนบ้านกะดาด",
-    template: "%s | ระบบออมทรัพย์โรงเรียนบ้านกะดาด",
-  },
-  description:
-    "ระบบออมทรัพย์นักเรียน โรงเรียนบ้านกะดาด สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสุรินทร์ เขต 3",
-};
+// อ่านชื่อโรงเรียน/สังกัดจากตั้งค่า (เปลี่ยนได้ที่ /settings) — ห้าม hardcode ชื่อโรงเรียน
+// metadata อยู่ใน <head> ของทุกหน้า จึงกัน error ไว้ด้วย DEFAULT (DB ล่มไม่ควรทำทั้งหน้าพัง)
+export async function generateMetadata(): Promise<Metadata> {
+  let setting = DEFAULT_SCHOOL_SETTING;
+  try {
+    setting = await getSchoolSetting();
+  } catch (e) {
+    console.error("generateMetadata: อ่านตั้งค่าโรงเรียนไม่ได้ ใช้ค่าเริ่มต้น:", e);
+  }
+  const { schoolName, schoolArea } = setting;
+  const siteTitle = `ระบบออมทรัพย์${schoolName}`;
+  return {
+    title: {
+      default: siteTitle,
+      template: `%s | ${siteTitle}`,
+    },
+    description: `ระบบออมทรัพย์นักเรียน ${schoolName} ${schoolArea}`,
+  };
+}
 
 export default function RootLayout({
   children,

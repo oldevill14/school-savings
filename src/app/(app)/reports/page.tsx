@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, School } from "lucide-react";
+import { ArrowRight, BookText, CalendarDays, School } from "lucide-react";
 import { requireRole } from "@/lib/auth";
+import Card from "@/components/ui/Card";
+import ExcelLinkButton from "./ExcelLinkButton";
 
 /**
- * /reports — หน้าเลือกประเภทรายงาน (ADMIN, TEACHER)
- * การ์ด 2 ใบ: รายงานรายห้องเรียน / รายงานรายปีการศึกษา
+ * /reports — หน้าเลือกประเภทรายงาน (ADMIN, TEACHER, EXECUTIVE อ่านอย่างเดียว)
+ * การ์ด: รายงานรายห้องเรียน / รายงานรายปีการศึกษา / ทะเบียนคุมเงิน + ส่งออกรายชื่อนักเรียน
  */
 export const dynamic = "force-dynamic";
 
@@ -14,19 +16,27 @@ const REPORT_TYPES = [
     icon: School,
     title: "รายงานสรุปรายห้องเรียน",
     description:
-      "เลือกห้องเรียนและช่วงเดือน — แสดงยอดยกมา รวมฝาก รวมถอน และคงเหลือของนักเรียนรายคน พร้อมแถวรวมท้ายตาราง",
+      "เลือกห้องเรียนและช่วงเดือน — แสดงยอดยกมา รวมฝาก รวมถอน และคงเหลือของนักเรียนรายคน พร้อมแถวรวมท้ายตาราง (พิมพ์ / ดาวน์โหลด Excel ได้)",
   },
   {
     href: "/reports/yearly",
     icon: CalendarDays,
     title: "รายงานสรุปรายปีการศึกษา",
     description:
-      "เลือกปีการศึกษา — สรุปยอดทุกห้องเรียน แถวรวมทั้งโรงเรียน และสรุปยอดฝาก-ถอนรายเดือนของปีนั้น",
+      "เลือกปีการศึกษา — สรุปยอดทุกห้องเรียน แถวรวมทั้งโรงเรียน และสรุปยอดฝาก-ถอนรายเดือนของปีนั้น (พิมพ์ / ดาวน์โหลด Excel ได้)",
+  },
+  {
+    href: "/reports/ledger",
+    icon: BookText,
+    title: "ทะเบียนคุมเงินออมทรัพย์นักเรียน",
+    description:
+      "ทะเบียนแนวราชการรายบัญชี — วันที่ รายการ รับ จ่าย คงเหลือ ผู้บันทึก พร้อมยอดยกมา/ยกไป เลือกทั้งโรงเรียนหรือรายห้อง (พิมพ์ A4 แนวนอน / ดาวน์โหลด Excel)",
   },
 ] as const;
 
 export default async function ReportsPage() {
-  await requireRole(["ADMIN", "TEACHER"]);
+  // EXECUTIVE (ผู้บริหาร) ดูรายงานแบบอ่านอย่างเดียว (หน้าเลือกประเภทรายงาน)
+  await requireRole(["ADMIN", "TEACHER", "EXECUTIVE"]);
 
   return (
     <div className="space-y-5">
@@ -34,11 +44,11 @@ export default async function ReportsPage() {
         <h1 className="text-xl">รายงานสรุป</h1>
         <p className="mt-1 text-sm text-slate-500">
           ตัวเลขทุกรายงานคำนวณจากธุรกรรมจริง (สถานะปกติ) ย้อนหลังทั้งหมด
-          ไม่ใช้ยอดคงเหลือสะสมในบัญชี — ทุกรายงานสั่งพิมพ์ได้จากปุ่มพิมพ์ในหน้ารายงาน
+          ไม่ใช้ยอดคงเหลือสะสมในบัญชี — ทุกรายงานสั่งพิมพ์และดาวน์โหลด Excel ได้จากในหน้ารายงาน
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {REPORT_TYPES.map((report) => {
           const Icon = report.icon;
           return (
@@ -66,6 +76,21 @@ export default async function ReportsPage() {
           );
         })}
       </div>
+
+      <Card
+        title="ส่งออกข้อมูลนักเรียน"
+        description="ดาวน์โหลดรายชื่อนักเรียนของปีการศึกษาที่เปิดใช้งาน พร้อมห้องเรียน สถานะ และยอดคงเหลือปัจจุบัน เป็นไฟล์ Excel"
+        actions={
+          <ExcelLinkButton href="/api/export/students">
+            ดาวน์โหลดรายชื่อนักเรียน (Excel)
+          </ExcelLinkButton>
+        }
+      >
+        <p className="text-sm text-slate-500">
+          ครูประจำชั้นจะได้รับเฉพาะรายชื่อนักเรียนในห้องของตนเอง —
+          ไฟล์จัดรูปแบบตัวเลขเงินเป็นทศนิยม 2 ตำแหน่งพร้อมหัวตารางภาษาไทย
+        </p>
+      </Card>
     </div>
   );
 }

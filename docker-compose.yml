@@ -27,7 +27,14 @@ services:
       # plain HTTP ใน LAN (http://<ip>:3000) ถ้าติด Secure browser จะทิ้ง cookie
       # แล้ว login วนไม่ติด; ตั้ง true ใน .env เฉพาะเมื่อมี HTTPS reverse proxy ข้างหน้า
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # โฟลเดอร์เก็บไฟล์อัปโหลด (โลโก้โรงเรียน, รูปนักเรียน) — ผูกกับ volume "uploads"
+      UPLOADS_DIR: /app/uploads
+      # LINE แจ้งเตือน (optional) — ปล่อยว่าง = ปิดฟีเจอร์แจ้งเตือน LINE
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
       TZ: Asia/Bangkok
+    volumes:
+      - uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -53,5 +60,48 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ------------------------------------------------------------------------
+  # ฟีเจอร์ข้อ 16: สำรองฐานข้อมูลอัตโนมัติ (pg_dump ทุก 24 ชม. เก็บ 14 ไฟล์ล่าสุด)
+  # เก็บลง volume "backups" — กู้คืน: gunzip < backup.sql.gz | docker compose exec -T db psql -U savings -d school_savings
+  # ------------------------------------------------------------------------
+  db-backup:
+    image: postgres:17-alpine
+    container_name: school-savings-backup
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:?ต้องตั้ง DB_PASSWORD ใน .env}
+      TZ: Asia/Bangkok
+    volumes:
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    # loop: dump -> gzip -> ลบไฟล์เกิน 14 ตัวล่าสุด -> sleep 24 ชม.
+    # ($$ = escape ให้เป็น $ ของ shell ใน container; $ เดี่ยวคือค่าที่ compose interpolate)
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # pipefail: ให้ exit code ของ pipeline สะท้อน pg_dump ที่ล้มเหลว ไม่ใช่แค่ gzip
+        # (busybox ash ของ postgres:17-alpine รองรับ — ยืนยันแล้ว); ถ้าไม่ตั้ง pg_dump พัง
+        # แต่ gzip compress สตรีมว่างสำเร็จ exit 0 -> log 'สำเร็จ' + เก็บ .gz ว่างทับ backup ดี
+        set -o pipefail;
+        echo "db-backup: เริ่มทำงาน — สำรองทุก 24 ชม. เก็บ 14 ไฟล์ล่าสุด";
+        while true; do
+          ts=$$(date +%Y%m%d_%H%M%S);
+          out="/backups/school_savings_$${ts}.sql.gz";
+          echo "[$$(date '+%Y-%m-%d %H:%M:%S')] กำลังสำรอง -> $${out}";
+          if pg_dump -h db -U savings -d school_savings | gzip > "$${out}"; then
+            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] สำรองสำเร็จ";
+          else
+            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] สำรองล้มเหลว — ลบไฟล์ที่ค้าง"; rm -f "$${out}";
+          fi;
+          ls -1t /backups/school_savings_*.sql.gz 2>/dev/null | tail -n +15 | while read -r old; do
+            echo "ลบ backup เก่า: $${old}"; rm -f "$${old}";
+          done;
+          sleep 86400;
+        done
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  uploads:
+  backups:
