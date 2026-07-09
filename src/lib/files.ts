@@ -1,19 +1,15 @@
 /**
- * จัดการไฟล์อัปโหลด (โลโก้โรงเรียน, รูปนักเรียน) บนดิสก์
+ * จัดการไฟล์อัปโหลด (โลโก้โรงเรียน, รูปนักเรียน) — เก็บเป็น bytes ใน Postgres (ตาราง UploadedFile)
  *
- * ใช้ได้เฉพาะฝั่ง server (Node.js runtime: fs) — ห้าม import จาก client component
- * และ route/handler ที่เรียกต้องประกาศ `export const runtime = "nodejs"`
+ * เดิมเขียนไฟล์ลงดิสก์ (fs) — เปลี่ยนมาเก็บใน DB เพื่อรองรับ serverless (Vercel/Cloudflare)
+ * ที่ไม่มีดิสก์ถาวร. contract กับ caller ไม่เปลี่ยน: ยังเก็บแค่ basename (fileName) ใน DB
+ * (SchoolSetting.logoFileName / Student.photoFileName) แล้วเรียก readUpload คืน bytes.
  *
- * เก็บไฟล์ที่ UPLOADS_DIR (env, default "./uploads") แยกโฟลเดอร์ย่อยตามชนิด
- * เช่น saveUpload("logo", file) -> UPLOADS_DIR/logo/<random>.png
- *      saveUpload("students", file) -> UPLOADS_DIR/students/<random>.jpg
- *
- * ความปลอดภัย: กัน path traversal เด็ดขาด — subdir/ชื่อไฟล์ต้องผ่าน whitelist regex
- * และตรวจซ้ำว่า resolved path ยังอยู่ใต้ UPLOADS_DIR เสมอ
+ * ใช้ได้เฉพาะฝั่ง server — โมดูลนี้ไม่พึ่ง fs แล้ว (ไม่มี path traversal ให้กังวล)
+ * แต่ route ที่เรียกยังควรประกาศ runtime = "nodejs" (prisma/bcrypt ใช้ Node API)
  */
 import { randomBytes } from "crypto";
-import { promises as fs } from "fs";
-import path from "path";
+import { prisma } from "@/lib/db";
 
 /** error สำหรับไฟล์ไม่ผ่าน validation — มี .status = 400 ให้ route แปลงเป็น response */
 export class FileValidationError extends Error {
@@ -21,6 +17,18 @@ export class FileValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FileValidationError";
+  }
+}
+
+/**
+ * ไฟล์อัปโหลดไม่พบใน DB — ตั้ง .code = "ENOENT" ให้ route เดิมที่เช็ค ENOENT
+ * (เช่น GET /api/files/students/[name]) แปลงเป็น 404 ได้เหมือนตอนอ่านจากดิสก์
+ */
+export class UploadNotFoundError extends Error {
+  code = "ENOENT" as const;
+  constructor(message = "ไม่พบไฟล์") {
+    super(message);
+    this.name = "UploadNotFoundError";
   }
 }
 
@@ -32,15 +40,10 @@ const ALLOWED_TYPES: Record<string, "png" | "jpg"> = {
 /** ขนาดสูงสุด 2 MB */
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
-/** subdir อนุญาตเฉพาะ a-z A-Z 0-9 _ - ยาว 1-32 (กัน "..", "/", ตัวอักษรพิเศษ) */
+/** subdir อนุญาตเฉพาะ a-z A-Z 0-9 _ - ยาว 1-32 */
 const SUBDIR_RE = /^[a-zA-Z0-9_-]{1,32}$/;
-/** ชื่อไฟล์อนุญาตเฉพาะ a-z A-Z 0-9 . _ - ยาว 1-128 */
+/** ชื่อไฟล์อนุญาตเฉพาะ a-z A-Z 0-9 . _ - ยาว 1-128 (กัน "..") */
 const FILENAME_RE = /^[a-zA-Z0-9._-]{1,128}$/;
-
-/** โฟลเดอร์ราก (absolute) — อ่าน env สดทุกครั้งเพื่อรองรับการตั้งค่าใน runtime */
-function baseDir(): string {
-  return path.resolve(process.env.UPLOADS_DIR || "./uploads");
-}
 
 function assertSubdir(subdir: string): string {
   if (!SUBDIR_RE.test(subdir)) {
@@ -50,15 +53,14 @@ function assertSubdir(subdir: string): string {
 }
 
 function assertFileName(name: string): string {
-  // ต้องเป็น basename ล้วน (ไม่มี path) + ผ่าน whitelist + ไม่มี ".."
-  if (path.basename(name) !== name || name.includes("..") || !FILENAME_RE.test(name)) {
+  if (name.includes("..") || !FILENAME_RE.test(name)) {
     throw new FileValidationError("ชื่อไฟล์ไม่ถูกต้อง");
   }
   return name;
 }
 
 export type SaveUploadResult = {
-  /** ชื่อไฟล์ (basename เท่านั้น) — เก็บลง DB เช่น SchoolSetting.logoFileName / Student.photoFileName */
+  /** ชื่อไฟล์ (basename) — เก็บลง DB เช่น SchoolSetting.logoFileName / Student.photoFileName */
   fileName: string;
   /** นามสกุล "png" | "jpg" */
   ext: "png" | "jpg";
@@ -66,7 +68,7 @@ export type SaveUploadResult = {
 
 /**
  * บันทึกไฟล์อัปโหลด — validate ประเภท (png/jpg) + ขนาด (<= 2MB) แล้วตั้งชื่อสุ่ม
- * คืน { fileName } เพื่อเก็บลง DB (อย่าเก็บ path เต็ม — เก็บแค่ basename)
+ * เก็บ bytes ลงตาราง UploadedFile คืน { fileName } เพื่อให้ caller เก็บ pointer ลง DB
  * โยน FileValidationError ถ้าไฟล์ไม่ผ่าน
  */
 export async function saveUpload(subdir: string, file: File): Promise<SaveUploadResult> {
@@ -86,11 +88,12 @@ export async function saveUpload(subdir: string, file: File): Promise<SaveUpload
     throw new FileValidationError("ไฟล์ต้องมีขนาดไม่เกิน 2 MB");
   }
 
-  const dir = path.join(baseDir(), safeSub);
-  await fs.mkdir(dir, { recursive: true });
-
+  const contentType = ext === "png" ? "image/png" : "image/jpeg";
   const fileName = `${Date.now()}-${randomBytes(8).toString("hex")}.${ext}`;
-  await fs.writeFile(path.join(dir, fileName), buf);
+
+  await prisma.uploadedFile.create({
+    data: { fileName, subdir: safeSub, contentType, data: buf, size: buf.length },
+  });
 
   return { fileName, ext };
 }
@@ -101,24 +104,22 @@ export type ReadUploadResult = {
 };
 
 /**
- * อ่านไฟล์อัปโหลดกลับ (สำหรับ route ที่ serve รูป) — กัน path traversal
- * โยน FileValidationError ถ้าชื่อไม่ถูกต้อง / โยน error ปกติของ fs ถ้าไฟล์ไม่มี
+ * อ่านไฟล์อัปโหลดกลับ (สำหรับ route ที่ serve รูป) จากตาราง UploadedFile
+ * โยน FileValidationError ถ้าชื่อไม่ถูกต้อง / โยน UploadNotFoundError (.code=ENOENT) ถ้าไม่พบ
  */
 export async function readUpload(subdir: string, name: string): Promise<ReadUploadResult> {
   const safeSub = assertSubdir(subdir);
   const safeName = assertFileName(name);
 
-  const dir = path.join(baseDir(), safeSub);
-  const full = path.join(dir, safeName);
-
-  // belt-and-suspenders: resolved path ต้องอยู่ใต้ dir เสมอ
-  if (full !== path.join(dir, path.basename(full)) || !full.startsWith(dir + path.sep)) {
-    throw new FileValidationError("ชื่อไฟล์ไม่ถูกต้อง");
+  const row = await prisma.uploadedFile.findUnique({
+    where: { fileName: safeName },
+    select: { subdir: true, contentType: true, data: true },
+  });
+  if (!row || row.subdir !== safeSub) {
+    throw new UploadNotFoundError();
   }
 
-  const data = await fs.readFile(full);
-  const contentType: "image/png" | "image/jpeg" = safeName.toLowerCase().endsWith(".png")
-    ? "image/png"
-    : "image/jpeg";
-  return { data, contentType };
+  const contentType: "image/png" | "image/jpeg" =
+    row.contentType === "image/png" ? "image/png" : "image/jpeg";
+  return { data: Buffer.from(row.data), contentType };
 }

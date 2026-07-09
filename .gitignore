@@ -34,3 +34,7 @@ next-env.d.ts
 /backups
 *.sql
 *.dump
+
+# Cloudflare / OpenNext build artifacts
+/.open-next/
+/.wrangler/

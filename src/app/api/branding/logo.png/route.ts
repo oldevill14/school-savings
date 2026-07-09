@@ -15,8 +15,6 @@
  * เบราว์เซอร์ revalidate ทุกครั้ง เห็นโลโก้ใหม่ทันทีหลังเปลี่ยน แต่ได้ 304 ถ้าไม่เปลี่ยน
  */
 import { NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
 import { getSchoolSetting } from "@/lib/settings";
 import { readUpload } from "@/lib/files";
 
@@ -55,14 +53,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // 2) fallback: public/logo.png (runtime cwd = /app ใน standalone, มี public/ ที่ COPY มา)
-  try {
-    const data = await fs.readFile(path.join(process.cwd(), "public", "logo.png"));
-    return imageResponse(data, "image/png", '"logo-default"', req);
-  } catch (e) {
-    console.error("branding/logo: อ่าน public/logo.png ไม่ได้:", e);
-  }
-
-  // 3) สุดทาง: ให้ static handler ของ Next เสิร์ฟ /logo.png เอง
+  // 2) fallback: ให้ static handler ของ Next เสิร์ฟ /logo.png (public/logo.png) เอง
+  //    (เลี่ยง fs.readFile — serverless ไม่มีดิสก์ถาวร; public/ ถูกเสิร์ฟเป็น static asset)
   return NextResponse.redirect(new URL("/logo.png", req.url), 307);
 }
