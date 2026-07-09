@@ -7,12 +7,16 @@
 // Student.photoFileName — ดูรายละเอียดใน CONTRACTS.md หัวข้อ "รอบขยายฟีเจอร์"
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // driverAdapters + serverExternalPackages (ใน next.config) → OpenNext patch client ให้รันบน
+  // Cloudflare Workers ได้ (ใช้ @prisma/adapter-pg ต่อ Postgres ผ่าน TCP — ไม่ติด wasm/fs)
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
@@ -81,6 +85,20 @@ model SchoolSetting {
   schoolArea   String
   logoFileName String?
   updatedAt    DateTime @updatedAt
+}
+
+/// ไฟล์อัปโหลด (โลโก้โรงเรียน, รูปนักเรียน) เก็บเป็น bytes ใน DB แทนการเขียนลงดิสก์
+/// เพื่อรองรับ serverless (Vercel/Cloudflare) ที่ไม่มีดิสก์ถาวร
+/// pointer เดิมไม่เปลี่ยน: SchoolSetting.logoFileName / Student.photoFileName = UploadedFile.fileName
+model UploadedFile {
+  fileName    String   @id
+  subdir      String
+  contentType String
+  data        Bytes
+  size        Int
+  createdAt   DateTime @default(now())
+
+  @@index([subdir])
 }
 
 // ผู้ปกครอง <-> นักเรียน (1 ผู้ปกครองผูกได้หลายลูก) — แทน User.linkedStudentId เดิม
